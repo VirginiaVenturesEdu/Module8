@@ -13,7 +13,7 @@
   .result-line { font-size: 3.6; color: #1F3A5F; text-align: center; margin-top: 2; }
   .takeaway { font-size: 3.6; font-weight: bold; color: #2e6b2e; text-align: center; margin-top: 3; }
   .action-button { display: flex; align-items: center; justify-content: center; margin-top: 4; padding-top: 3; padding-bottom: 3; padding-left: 8; padding-right: 8; background-color: #c8962a; border-radius: 4; cursor: pointer; }
-  .action-label { font-size: 4.4; font-weight: bold; color: #1F3A5F; }
+  .action-label { font-size: 4.4; font-weight: bold; color: #1F3A5F; word-break: keep-all; }
 </style>
 
 <div class="panel">

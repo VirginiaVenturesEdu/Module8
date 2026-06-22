@@ -9,7 +9,7 @@
   .answer-label { font-size: 3.4; color: #1F3A5F; }
   .reply-text { font-size: 4; color: #1F3A5F; text-align: center; margin-top: 2; }
   .got-it-button { display: flex; align-items: center; justify-content: center; margin-top: 4; padding-top: 3; padding-bottom: 3; padding-left: 9; padding-right: 9; background-color: #c8962a; border-radius: 4; cursor: pointer; }
-  .got-it-label { font-size: 4.4; font-weight: bold; color: #1F3A5F; }
+  .got-it-label { font-size: 4.4; font-weight: bold; color: #1F3A5F; word-break: keep-all; }
 </style>
 
 <div class="panel">

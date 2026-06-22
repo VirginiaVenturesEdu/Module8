@@ -19,7 +19,7 @@
   .bar-fill-smarts { background-color: #c8962a; }
   .meter-value { font-size: 3.6; font-weight: bold; color: #1F3A5F; width: 12; text-align: right; }
   .play-again-button { display: flex; align-items: center; justify-content: center; margin-top: 5; padding-top: 3; padding-bottom: 3; padding-left: 9; padding-right: 9; background-color: #c8962a; border-radius: 4; cursor: pointer; }
-  .play-again-label { font-size: 4.4; font-weight: bold; color: #1F3A5F; }
+  .play-again-label { font-size: 4.4; font-weight: bold; color: #1F3A5F; word-break: keep-all; }
 </style>
 
 <div class="panel">

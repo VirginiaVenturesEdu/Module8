@@ -41,6 +41,7 @@
     font-size: 5.5;
     font-weight: bold;
     color: #1F3A5F;
+    word-break: keep-all;
   }
 </style>
 
