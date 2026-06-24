@@ -8,30 +8,32 @@
   .answer { display: flex; align-items: center; width: 110; padding-top: 3; padding-bottom: 3; padding-left: 4; padding-right: 4; margin-top: 1.5; background-color: #fbf4e3; border-width: 1.2; border-color: #1F3A5F; border-radius: 3; cursor: pointer; }
   .answer-label { font-size: 3.4; color: #1F3A5F; }
   .reply-text { font-size: 4; color: #1F3A5F; text-align: center; margin-top: 2; }
+  .meter-change { font-size: 3.4; font-weight: bold; color: #2e7d32; text-align: center; margin-top: 1.5; }
   .got-it-button { display: flex; align-items: center; justify-content: center; margin-top: 4; padding-top: 3; padding-bottom: 3; padding-left: 9; padding-right: 9; background-color: #c8962a; border-radius: 4; cursor: pointer; }
   .got-it-label { font-size: 4.4; font-weight: bold; color: #1F3A5F; word-break: keep-all; }
 </style>
 
-<div class="panel">
+<div id="game-panel" class="panel">
   <div id="beat-q" class="beat">
-    <span class="eyebrow">GUS ASKS</span>
-    <span class="q-text">Birthday money, lucky you! Quick question before you run off. What happens if you spend every single dollar the day you get it?</span>
+    <span id="eyebrow-asks" class="eyebrow">MS. DELIA ASKS</span>
+    <span id="q-text" class="q-text">A flour seller offers a giant pallet at a big discount, far more than we need for today. What is your call?</span>
     <div class="answers">
       <div id="answer-a" class="answer">
-        <span class="answer-label">I would have nothing left if I need money later.</span>
+        <span id="answer-a-label" class="answer-label">Buy a fair amount. Enough to save money, but not so much that it goes to waste.</span>
       </div>
       <div id="answer-b" class="answer">
-        <span class="answer-label">Nothing bad. Money is for spending right away!</span>
+        <span id="answer-b-label" class="answer-label">Grab the whole pallet! A discount is always worth it.</span>
       </div>
       <div id="answer-c" class="answer">
-        <span class="answer-label">I will just get more money tomorrow.</span>
+        <span id="answer-c-label" class="answer-label">Skip it, and buy only what today needs.</span>
       </div>
     </div>
   </div>
 
   <div id="beat-reply" class="beat">
-    <span class="eyebrow">GUS SAYS</span>
+    <span id="eyebrow-says" class="eyebrow">MS. DELIA SAYS</span>
     <span id="reply-text" class="reply-text">...</span>
+    <span id="meter-change" class="meter-change"></span>
     <div id="got-it-button" class="got-it-button">
       <span class="got-it-label">Got It</span>
     </div>

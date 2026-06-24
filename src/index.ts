@@ -7,7 +7,7 @@
 //   3. The three score meters and the HUD that shows them
 //   4. The IWSDK world: a walkable, lit space, with mouse-look + WASD/thumbstick
 //   5. The hidden-panel click guard and a press helper (needed once panels exist)
-//   6. The phase machine skeleton (Setup -> Stage 1 -> 2 -> 3 -> Report)
+//   6. The phase machine skeleton (Select -> Morning -> Midday -> Afternoon -> Close)
 // The stations, the mentor, the panels, and the stage logic arrive in later prompts.
 // ============================================================================
 
@@ -25,7 +25,8 @@ import {
   Box3,
 } from "@iwsdk/core";
 
-import { buildEnvironment, setStageLook, GUS_SPOT, STATIONS, setPlantGrowth } from "./environment";
+import { buildBaseWorld, buildShopProps, setStageLook, GUS_SPOT, STATIONS } from "./environment";
+import { setActiveShop, activeShop, SHOPS, ShopId, ShopPack } from "./shops";
 import { sfxStage, sfxClick, sfxCoin, sfxFanfare } from "./sfx";
 
 // ============================================================================
@@ -54,18 +55,19 @@ const COLOR_NAVY = "#1F3A5F";
 const TEXT_GOLD = "#8a6118";
 const TEXT_GREEN = "#2e7d32";
 const TEXT_BLUE = "#1e5fa8";
-const METER_GROWTH_COLOR = "#5fae4a";   // Financial Growth bar (green)
-const METER_SECURITY_COLOR = "#4a8fd6"; // Financial Security bar (blue)
-const METER_SMARTS_COLOR = "#c8962a";   // Money Smarts bar (gold)
+const TEXT_CORAL = "#a23a1c";
+const METER_SATISFACTION_COLOR = "#ee7a4f"; // Customer Satisfaction bar (coral)
+const METER_PROFIT_COLOR = "#5fae4a";       // Business Profit bar (green)
+const METER_INSTINCT_COLOR = "#3f9fd0";     // Owner's Instinct bar (blue)
 
 // ============================================================================
 // THREE METERS  (each starts at 50, the neutral middle, and moves 0..100)
 // ============================================================================
 const SCORE_MIN = 0;
 const SCORE_MAX = 100;
-let scoreGrowth = 50;
-let scoreSecurity = 50;
-let scoreSmarts = 50;
+let scoreSatisfaction = 50;
+let scoreProfit = 50;
+let scoreInstinct = 50;
 
 // Which plan the player picked in each stage. The final money personality is
 // decided from THESE choices, not just the meter numbers, so the report can
@@ -78,21 +80,20 @@ function clampScore(value: number): number {
   return Math.max(SCORE_MIN, Math.min(SCORE_MAX, value));
 }
 
-// The one and only way to change a meter. meter is "growth", "security", or
-// "smarts"; delta is positive to reward, negative to penalize.
+// The one and only way to change a meter. meter is "satisfaction", "profit", or
+// "instinct"; delta is positive to reward, negative to penalize.
 function updateScore(meter: string, delta: number) {
   let before = 0;
   let after = 0;
-  if (meter === "growth") { before = scoreGrowth; after = clampScore(scoreGrowth + delta); scoreGrowth = after; }
-  else if (meter === "security") { before = scoreSecurity; after = clampScore(scoreSecurity + delta); scoreSecurity = after; }
-  else if (meter === "smarts") { before = scoreSmarts; after = clampScore(scoreSmarts + delta); scoreSmarts = after; }
+  if (meter === "satisfaction") { before = scoreSatisfaction; after = clampScore(scoreSatisfaction + delta); scoreSatisfaction = after; }
+  else if (meter === "profit") { before = scoreProfit; after = clampScore(scoreProfit + delta); scoreProfit = after; }
+  else if (meter === "instinct") { before = scoreInstinct; after = clampScore(scoreInstinct + delta); scoreInstinct = after; }
   else { console.warn("updateScore: unknown meter " + meter); return; }
   console.log("[SCORE] " + meter + ": " + before + " to " + after);
-  if (meter === "growth") setPlantGrowth(scoreGrowth / 100);
   refreshHUD();
-  if (meter === "growth") bumpHudValue(hudGrowthValue);
-  else if (meter === "security") bumpHudValue(hudSecurityValue);
-  else bumpHudValue(hudSmartsValue);
+  if (meter === "satisfaction") bumpHudValue(hudSatisfactionValue);
+  else if (meter === "profit") bumpHudValue(hudProfitValue);
+  else bumpHudValue(hudInstinctValue);
 }
 void updateScore; // used by the stages in later prompts
 
@@ -102,31 +103,37 @@ void updateScore; // used by the stages in later prompts
 // so it never blocks a click. A matching 3D scoreboard for the headset is added
 // with the panels in a later prompt.
 // ============================================================================
-let hudGrowthValue: HTMLElement | null = null;
-let hudSecurityValue: HTMLElement | null = null;
-let hudSmartsValue: HTMLElement | null = null;
-let hudGrowthFill: HTMLElement | null = null;
-let hudSecurityFill: HTMLElement | null = null;
-let hudSmartsFill: HTMLElement | null = null;
+let hudSatisfactionValue: HTMLElement | null = null;
+let hudProfitValue: HTMLElement | null = null;
+let hudInstinctValue: HTMLElement | null = null;
+let hudSatisfactionFill: HTMLElement | null = null;
+let hudProfitFill: HTMLElement | null = null;
+let hudInstinctFill: HTMLElement | null = null;
 let hudStageChip: HTMLElement | null = null;
 let hudObjective: HTMLElement | null = null;
+let hudPanel: HTMLElement | null = null;
 
 function makeHudMeter(label: string, barColor: string, textColor: string) {
   const row = document.createElement("div");
-  row.style.display = "flex";
-  row.style.alignItems = "center";
-  row.style.gap = "8px";
-  row.style.marginBottom = "7px";
+  row.style.marginBottom = "9px";
 
+  // The label sits on its own line, so a long name like "Customer Satisfaction"
+  // gets the full width and is never clipped. The bar and number go below it.
   const labelEl = document.createElement("span");
   labelEl.textContent = label;
   labelEl.style.color = COLOR_NAVY;
   labelEl.style.fontWeight = "700";
-  labelEl.style.width = "140px";
-  labelEl.style.whiteSpace = "nowrap";
+  labelEl.style.fontSize = "12.5px";
+  labelEl.style.display = "block";
+  labelEl.style.marginBottom = "4px";
+
+  const barRow = document.createElement("div");
+  barRow.style.display = "flex";
+  barRow.style.alignItems = "center";
+  barRow.style.gap = "8px";
 
   const track = document.createElement("div");
-  track.style.width = "90px";
+  track.style.width = "120px";
   track.style.height = "12px";
   track.style.background = "#e4ddd0";
   track.style.borderRadius = "6px";
@@ -149,10 +156,103 @@ function makeHudMeter(label: string, barColor: string, textColor: string) {
   value.style.textAlign = "right";
   value.style.transition = "transform 0.18s ease";
 
+  barRow.appendChild(track);
+  barRow.appendChild(value);
   row.appendChild(labelEl);
-  row.appendChild(track);
-  row.appendChild(value);
+  row.appendChild(barRow);
   return { row, value, fill };
+}
+
+// Turn a #rrggbb color into a see-through rgba string, so the overlay keeps
+// its soft translucent look instead of becoming a solid block.
+function hexToRgba(hex: string, alpha: number) {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  return "rgba(" + r + ", " + g + ", " + b + ", " + alpha + ")";
+}
+
+// Tint the corner overlay to the active shop: a translucent version of the
+// shop's panel color, with the shop's border. The bars, money, and text keep
+// their own colors.
+function applyShopHudTheme(pack: ShopPack) {
+  if (!hudPanel) return;
+  hudPanel.style.background = hexToRgba(pack.theme.panelBg, 0.95);
+  hudPanel.style.border = "2px solid " + pack.theme.panelBorder;
+}
+
+// Show a counter activity's meter changes in its result: one short line per
+// meter that moved, green for a gain and red for a drop. Unchanged meters stay
+// hidden. Shared by all three activities.
+const DELTA_UP = "#2e7d32";
+const DELTA_DOWN = "#b23a2e";
+
+function setMeterChange(doc: any, id: string, label: string, delta: number) {
+  const el = doc.getElementById(id);
+  if (!el) return;
+  if (!delta) {
+    el.setProperties({ display: "none" });
+    return;
+  }
+  el.setProperties({
+    text: label + "   " + (delta > 0 ? "+" : "") + delta,
+    color: delta > 0 ? DELTA_UP : DELTA_DOWN,
+    display: "flex",
+  });
+}
+
+function showMeterChanges(doc: any, sat: number, profit: number, instinct: number) {
+  setMeterChange(doc, "change-sat", "Customer Satisfaction", sat);
+  setMeterChange(doc, "change-profit", "Business Profit", profit);
+  setMeterChange(doc, "change-instinct", "Owner's Instinct", instinct);
+  flashHudDeltas(sat, profit, instinct);
+}
+
+// Desktop HUD: a small +/- badge beside each meter's number that flashes the
+// change from a counter activity (green up, red down) and fades. These are
+// on-screen DOM elements, so they appear on the laptop and are unused in the
+// headset, where the floating dashboard already shows the meters.
+let hudDeltaSat: HTMLElement | null = null;
+let hudDeltaProfit: HTMLElement | null = null;
+let hudDeltaInstinct: HTMLElement | null = null;
+
+function makeDeltaBadge(valueEl: HTMLElement | null): HTMLElement | null {
+  if (!valueEl) return null;
+  const badge = document.createElement("span");
+  badge.style.marginLeft = "8px";
+  badge.style.fontWeight = "700";
+  badge.style.fontSize = "13px";
+  badge.style.opacity = "0";
+  badge.style.transition = "opacity 0.3s ease";
+  valueEl.insertAdjacentElement("afterend", badge);
+  return badge;
+}
+
+function setupHudDeltas() {
+  hudDeltaSat = makeDeltaBadge(hudSatisfactionValue);
+  hudDeltaProfit = makeDeltaBadge(hudProfitValue);
+  hudDeltaInstinct = makeDeltaBadge(hudInstinctValue);
+}
+
+function flashOneDelta(badge: HTMLElement | null, delta: number) {
+  if (!badge) return;
+  if (!delta) {
+    badge.style.opacity = "0";
+    return;
+  }
+  badge.textContent = (delta > 0 ? "+" : "") + delta;
+  badge.style.color = delta > 0 ? "#2e7d32" : "#b23a2e";
+  badge.style.opacity = "1";
+  window.setTimeout(function () {
+    badge.style.opacity = "0";
+  }, 1800);
+}
+
+function flashHudDeltas(sat: number, profit: number, instinct: number) {
+  flashOneDelta(hudDeltaSat, sat);
+  flashOneDelta(hudDeltaProfit, profit);
+  flashOneDelta(hudDeltaInstinct, instinct);
 }
 
 function createHUD() {
@@ -169,6 +269,7 @@ function createHUD() {
   hud.style.fontSize = "14px";
   hud.style.boxShadow = "0 4px 14px rgba(31, 58, 95, 0.3)";
   hud.style.pointerEvents = "none";
+  hudPanel = hud; // remember the panel so we can recolor it per shop
 
   const header = document.createElement("div");
   header.style.display = "flex";
@@ -178,7 +279,7 @@ function createHUD() {
   header.style.marginBottom = "8px";
 
   const title = document.createElement("span");
-  title.textContent = "Money Moves";
+  title.textContent = "Boss for a Day";
   title.style.color = COLOR_NAVY;
   title.style.fontWeight = "800";
   title.style.fontSize = "15px";
@@ -199,20 +300,20 @@ function createHUD() {
   const moneyRow = buildMoneyRow();
   hud.appendChild(moneyRow);
 
-  const growthRow = makeHudMeter("Financial Growth", METER_GROWTH_COLOR, TEXT_GREEN);
-  const securityRow = makeHudMeter("Financial Security", METER_SECURITY_COLOR, TEXT_BLUE);
-  const smartsRow = makeHudMeter("Money Smarts", METER_SMARTS_COLOR, TEXT_GOLD);
+  const satisfactionRow = makeHudMeter("Customer Satisfaction", METER_SATISFACTION_COLOR, TEXT_CORAL);
+  const profitRow       = makeHudMeter("Business Profit", METER_PROFIT_COLOR, TEXT_GREEN);
+  const instinctRow     = makeHudMeter("Owner's Instinct", METER_INSTINCT_COLOR, TEXT_BLUE);
 
-  hudGrowthValue = growthRow.value;
-  hudSecurityValue = securityRow.value;
-  hudSmartsValue = smartsRow.value;
-  hudGrowthFill = growthRow.fill;
-  hudSecurityFill = securityRow.fill;
-  hudSmartsFill = smartsRow.fill;
+  hudSatisfactionValue = satisfactionRow.value;
+  hudProfitValue = profitRow.value;
+  hudInstinctValue = instinctRow.value;
+  hudSatisfactionFill = satisfactionRow.fill;
+  hudProfitFill = profitRow.fill;
+  hudInstinctFill = instinctRow.fill;
 
-  hud.appendChild(growthRow.row);
-  hud.appendChild(securityRow.row);
-  hud.appendChild(smartsRow.row);
+  hud.appendChild(satisfactionRow.row);
+  hud.appendChild(profitRow.row);
+  hud.appendChild(instinctRow.row);
 
   hudObjective = document.createElement("div");
   hudObjective.textContent = "";
@@ -233,12 +334,71 @@ function createHUD() {
 
 // Push the current numbers and bar widths into the HUD.
 function refreshHUD() {
-  if (hudGrowthValue) hudGrowthValue.textContent = String(Math.round(scoreGrowth));
-  if (hudSecurityValue) hudSecurityValue.textContent = String(Math.round(scoreSecurity));
-  if (hudSmartsValue) hudSmartsValue.textContent = String(Math.round(scoreSmarts));
-  if (hudGrowthFill) hudGrowthFill.style.width = scoreGrowth + "%";
-  if (hudSecurityFill) hudSecurityFill.style.width = scoreSecurity + "%";
-  if (hudSmartsFill) hudSmartsFill.style.width = scoreSmarts + "%";
+  if (hudSatisfactionValue) hudSatisfactionValue.textContent = String(Math.round(scoreSatisfaction));
+  if (hudProfitValue) hudProfitValue.textContent = String(Math.round(scoreProfit));
+  if (hudInstinctValue) hudInstinctValue.textContent = String(Math.round(scoreInstinct));
+  if (hudSatisfactionFill) hudSatisfactionFill.style.width = scoreSatisfaction + "%";
+  if (hudProfitFill) hudProfitFill.style.width = scoreProfit + "%";
+  if (hudInstinctFill) hudInstinctFill.style.width = scoreInstinct + "%";
+}
+
+// ---- In-headset dashboard: keep its numbers in step with the game ----
+// The follow loop calls this each tick while you are in the headset. It reads
+// the same live numbers the corner overlay uses, and only pushes a value when
+// it actually changed, so the panel is never redrawn for no reason.
+let dashboardDoc: any = null;
+const DASH_TRACK = 64; // must match the .track width in ui/dashboard.uikitml
+let _lastSat = -1;
+let _lastProf = -1;
+let _lastInst = -1;
+let _lastMoney = -1;
+let _lastObjective = "";
+
+function refreshVrDashboard() {
+  if (!dashboardDoc) return;
+
+  const sat = Math.round(scoreSatisfaction);
+  if (sat !== _lastSat) {
+    _lastSat = sat;
+    const v = dashboardDoc.getElementById("dash-val-sat");
+    if (v) v.setProperties({ text: String(sat) });
+    const f = dashboardDoc.getElementById("dash-fill-sat");
+    if (f) f.setProperties({ width: (DASH_TRACK * sat) / 100 });
+  }
+
+  const prof = Math.round(scoreProfit);
+  if (prof !== _lastProf) {
+    _lastProf = prof;
+    const v = dashboardDoc.getElementById("dash-val-profit");
+    if (v) v.setProperties({ text: String(prof) });
+    const f = dashboardDoc.getElementById("dash-fill-profit");
+    if (f) f.setProperties({ width: (DASH_TRACK * prof) / 100 });
+  }
+
+  const inst = Math.round(scoreInstinct);
+  if (inst !== _lastInst) {
+    _lastInst = inst;
+    const v = dashboardDoc.getElementById("dash-val-instinct");
+    if (v) v.setProperties({ text: String(inst) });
+    const f = dashboardDoc.getElementById("dash-fill-instinct");
+    if (f) f.setProperties({ width: (DASH_TRACK * inst) / 100 });
+  }
+
+  if (currentMoney !== _lastMoney) {
+    _lastMoney = currentMoney;
+    const m = dashboardDoc.getElementById("dash-money");
+    if (m) m.setProperties({ text: "$" + currentMoney });
+  }
+
+  const obj =
+    hudObjective && hudObjective.textContent
+      ? hudObjective.textContent
+      : "Running your shop.";
+  if (obj !== _lastObjective) {
+    _lastObjective = obj;
+    const o = dashboardDoc.getElementById("dash-objective");
+    if (o) o.setProperties({ text: obj });
+  }
 }
 
 // A quick pop on a number that just changed.
@@ -260,11 +420,11 @@ function setObjective(text: string) {
 // Update the little stage label in the HUD header for each phase.
 function setHudStage(phase: string) {
   if (!hudStageChip) return;
-  let label = "Getting Ready";
-  if (phase === PHASE_S1) label = "Stage 1";
-  else if (phase === PHASE_S2) label = "Stage 2";
-  else if (phase === PHASE_S3) label = "Stage 3";
-  else if (phase === PHASE_REPORT) label = "Report";
+  let label = "Pick a Shop";
+  if (phase === PHASE_MORNING) label = "Morning";
+  else if (phase === PHASE_MIDDAY) label = "Midday";
+  else if (phase === PHASE_AFTERNOON) label = "Afternoon";
+  else if (phase === PHASE_CLOSE) label = "Daily Report";
   hudStageChip.textContent = label;
 }
 
@@ -388,13 +548,13 @@ function animateMoneyTo(target: number, isGain: boolean) {
 // ============================================================================
 // PHASE MACHINE  (the master flow; panels get attached in a later prompt)
 // ============================================================================
-const PHASE_SETUP = "setup";
-const PHASE_S1 = "stage1";
-const PHASE_S2 = "stage2";
-const PHASE_S3 = "stage3";
-const PHASE_REPORT = "report";
-const PHASE_ORDER = [PHASE_SETUP, PHASE_S1, PHASE_S2, PHASE_S3, PHASE_REPORT];
-let currentPhase = PHASE_SETUP;
+const PHASE_SELECT = "select";
+const PHASE_MORNING = "morning";
+const PHASE_MIDDAY = "midday";
+const PHASE_AFTERNOON = "afternoon";
+const PHASE_CLOSE = "close";
+const PHASE_ORDER = [PHASE_SELECT, PHASE_MORNING, PHASE_MIDDAY, PHASE_AFTERNOON, PHASE_CLOSE];
+let currentPhase = PHASE_SELECT;
 
 // Panels registered per phase. showPhase shows the active one and hides the rest.
 const phasePanels: any = {};
@@ -402,10 +562,10 @@ const phasePanels: any = {};
 function showPhase(phase: string) {
   currentPhase = phase;
   setHudStage(phase);
-  if (phase === PHASE_SETUP) setMoney(ECON.STARTING_MONEY);
-  else if (phase === PHASE_S1) setMoney(ECON.STARTING_MONEY + ECON.ALLOWANCE_PER_WEEK);
-  else if (phase === PHASE_S2) setMoney(ECON.PAYCHECK_STAGE2);
-  else if (phase === PHASE_S3) setMoney(ECON.BIG_DECISION_FUNDS);
+  if (phase === PHASE_SELECT) setMoney(ECON.STARTING_MONEY);
+  else if (phase === PHASE_MORNING) setMoney(ECON.STARTING_MONEY + ECON.ALLOWANCE_PER_WEEK);
+  else if (phase === PHASE_MIDDAY) setMoney(ECON.PAYCHECK_STAGE2);
+  else if (phase === PHASE_AFTERNOON) setMoney(ECON.BIG_DECISION_FUNDS);
   else hideMoneyRow();
   for (const key in phasePanels) {
     const panel = phasePanels[key];
@@ -560,6 +720,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   const _presSize = new Vector3();
   const _presBox = new Box3();
   const PRESENT_MARGIN = 1.18;  // breathing room so the panel is not edge-to-edge
+  const PRESENT_MARGIN_DESKTOP = 1.4; // a bit more on a laptop, so the corner overlay does not crowd panels
   const PRESENT_MIN_DIST = 2.4; // never closer than this, however small the panel
   const PRESENT_MAX_DIST = 6.0; // never farther than this, however large the panel
 
@@ -581,7 +742,11 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     const aspect = cam.aspect || 1;
     const distH = h / 2 / tanV;
     const distW = w / 2 / (tanV * aspect);
-    let dist = Math.max(distH, distW) * PRESENT_MARGIN;
+    // On a laptop the corner overlay sits in front of panels, so give them more
+    // room there. In the headset there is no overlay, so keep them big.
+    const desktopView = world.visibilityState.peek() === VisibilityState.NonImmersive;
+    const margin = desktopView ? PRESENT_MARGIN_DESKTOP : PRESENT_MARGIN;
+    let dist = Math.max(distH, distW) * margin;
     dist = Math.max(PRESENT_MIN_DIST, Math.min(PRESENT_MAX_DIST, dist));
 
     // Place it straight ahead of the camera, level, at the player's eye height.
@@ -647,18 +812,85 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   // --------------------------------------------------------------------------
   // The walkable world (sky, light, ground). See src/environment.ts.
   // --------------------------------------------------------------------------
-  const built = buildEnvironment(world);
+  const built = buildBaseWorld(world);
   const ground = built.ground;
   ground.addComponent(LocomotionEnvironment, { type: EnvironmentType.STATIC });
   // The hedge ring is collision too: the locomotion engine bakes its meshes into
   // the walkable BVH, so the player's capsule bumps into it and can no longer
   // walk off the edge of the world and fall.
   built.boundary.addComponent(LocomotionEnvironment, { type: EnvironmentType.STATIC });
-  setStageLook(world, PHASE_SETUP);
+  setStageLook(world, PHASE_SELECT);
+
+  // Hide the shop shell during the picker, so the student chooses over an empty
+  // lobby. It is revealed in pick() once they choose. The floor stays present
+  // (just invisible) so they are always standing on solid ground.
+  ground.object3D!.visible = false;
+  built.boundary.object3D!.visible = false;
+  for (const e of built.street) e.object3D!.visible = false;
 
   // Build the HUD and show the opening goal.
   createHUD();
-  setObjective("Look around by holding the right mouse button, and walk with W A S D.");
+  setupHudDeltas();
+  setObjective("Take a moment to read the welcome screen.");
+
+  // ======================================================================
+  // IN-HEADSET DASHBOARD
+  // The corner overlay is a flat screen element and does not render inside
+  // the headset, so there we show this 3D panel and have it ride along with
+  // the view so it is always visible. On desktop it stays hidden, because the
+  // corner overlay covers that. Wired to live numbers in a later step.
+  // ======================================================================
+  const dashboardPanel = world
+    .createTransformEntity()
+    .addComponent(PanelUI, { config: "./ui/dashboard.json", maxWidth: 1.0, maxHeight: 0.85 });
+  dashboardPanel.object3D!.visible = false;
+
+  // Grab the panel's document once it has loaded, so we can update its numbers.
+  whenPanelReady(dashboardPanel, function (doc) {
+    dashboardDoc = doc;
+  });
+
+  // --- Where the dashboard sits in your view (metres). Tune these in headset. ---
+  const DASH_DIST = 1.4;   // how far in front of you
+  const DASH_DROP = 0.45;  // how far below your eye line
+  const DASH_SIDE = -0.6;  // sideways shift (negative = left)
+  const DASH_LERP = 0.18;  // 0..1, how quickly it catches up when you turn
+
+  const _dashEye = new Vector3();
+  const _dashFwd = new Vector3();
+  const _dashRight = new Vector3();
+  const _dashUp = new Vector3();
+  const _dashTarget = new Vector3();
+  const _dashWorldUp = new Vector3(0, 1, 0);
+
+  setInterval(function () {
+    const o3d = dashboardPanel.object3D;
+    if (!o3d) return;
+    // Desktop uses the corner overlay; keep the 3D one hidden there.
+    if (world.visibilityState.peek() === VisibilityState.NonImmersive) {
+      o3d.visible = false;
+      return;
+    }
+    const cam = world.camera as any;
+    cam.getWorldPosition(_dashEye);
+    cam.getWorldDirection(_dashFwd);
+    _dashFwd.normalize();
+    _dashRight.crossVectors(_dashFwd, _dashWorldUp).normalize();
+    _dashUp.crossVectors(_dashRight, _dashFwd).normalize();
+    _dashTarget.copy(_dashEye)
+      .addScaledVector(_dashFwd, DASH_DIST)
+      .addScaledVector(_dashUp, -DASH_DROP)
+      .addScaledVector(_dashRight, DASH_SIDE);
+    if (!o3d.visible) {
+      o3d.position.copy(_dashTarget); // snap into place the first time
+      o3d.visible = true;
+    } else {
+      o3d.position.lerp(_dashTarget, DASH_LERP); // smooth follow afterwards
+    }
+    // Face the player, staying upright.
+    o3d.rotation.set(0, Math.atan2(_dashEye.x - o3d.position.x, _dashEye.z - o3d.position.z), 0, "YXZ");
+    refreshVrDashboard();
+  }, 33);
 
   // Start the flow at Setup.
   // ==========================================================================
@@ -718,10 +950,8 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   const WELCOME_STEPS = 5;
   let welcomeStep = 1;
   whenPanelReady(welcomePanel, function (doc) {
-    const GOLD = "#c8962a";
     const DISABLED_BG = "#c9c2b5";
     const DISABLED_TEXT = "#7a7a7a";
-    const NAVY = "#1F3A5F";
 
     const backButton = doc.getElementById("back-button");
     const backLabel = doc.getElementById("back-label");
@@ -736,8 +966,8 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       }
       indicator?.setProperties({ text: "Step " + n + " of " + WELCOME_STEPS });
       const onFirst = n === 1;
-      backButton?.setProperties({ backgroundColor: onFirst ? DISABLED_BG : GOLD });
-      backLabel?.setProperties({ color: onFirst ? DISABLED_TEXT : NAVY });
+      backButton?.setProperties({ backgroundColor: onFirst ? DISABLED_BG : activeShop.theme.boxBorder });
+      backLabel?.setProperties({ color: onFirst ? DISABLED_TEXT : activeShop.theme.ink });
       const onLast = n === WELCOME_STEPS;
       nextLabel?.setProperties({ text: onLast ? "Start Playing" : "Next" });
     }
@@ -758,9 +988,8 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
         } else {
           sfxClick();
           welcomePanel.object3D!.visible = false;
-          showPhase(PHASE_SETUP);
-          presentPanel(setupPanel); // place it in front, in case you wandered off
-          setObjective("Pick your explorer, then tap Begin.");
+          showPhase(PHASE_MORNING);
+          setObjective(activeShop.goals.sayHi);
         }
       },
     });
@@ -777,7 +1006,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     .addComponent(Interactable);
   setupPanel.object3D!.position.set(0, 1.6, 7.2);
   setupPanel.object3D!.visible = false;
-  phasePanels[PHASE_SETUP] = setupPanel;
+  phasePanels[PHASE_SELECT] = setupPanel;
 
   // The four characters. Only the name is used in code (for the final report);
   // the words on the cards live in ui/setup.uikitml.
@@ -790,8 +1019,8 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   let chosenCharacter: any = null;
 
   whenPanelReady(setupPanel, function (doc) {
-    const GOLD = "#c8962a";
-    const NAVY = "#1F3A5F";
+    const GOLD = "#d98a8f";
+    const NAVY = "#5b3a24";
 
     const beginButton = doc.getElementById("begin-button");
     const beginLabel = doc.getElementById("begin-label");
@@ -819,8 +1048,8 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
         if (!chosenCharacter) return; // must pick someone first
         sfxClick();
         setupPanel.object3D!.visible = false;
-        showPhase(PHASE_S1);
-        setObjective("Stroll Main Street and go say hi to Gus.");
+        showPhase(PHASE_MORNING);
+        setObjective(activeShop.goals.sayHi);
       },
     });
   });
@@ -860,9 +1089,11 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       if (answered) return;
       answered = true;
       sfxCoin();
-      updateScore("smarts", isBest ? SMARTS_BEST : SMARTS_OK);
-      const lesson = "If you spend it all at once, you have nothing left for later or for a surprise. Saving even a little keeps you ready. Let's see how you do!";
+      const instinctGain = isBest ? SMARTS_BEST : SMARTS_OK;
+      updateScore("instinct", instinctGain);
+      const lesson = activeShop.morning.gusLesson;
       replyText?.setProperties({ text: opener + " " + lesson });
+      doc.getElementById("meter-change")?.setProperties({ text: "Owner's Instinct  +" + instinctGain });
       beatQ?.setProperties({ display: "none" });
       beatReply?.setProperties({ display: "flex" });
       gusQ1Replying = true;
@@ -878,7 +1109,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
         gusQ1Done = true;
         gusQ1Replying = false;
         gusQ1Panel.object3D!.visible = false;
-        setObjective("Now head to the Bank to make your money plan.");
+        setObjective(activeShop.goals.morningCounter);
       },
     });
   });
@@ -890,7 +1121,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       gusQ1Panel.object3D!.visible = false;
       return;
     }
-    if (currentPhase !== PHASE_S1) {
+    if (currentPhase !== PHASE_MORNING) {
       gusQ1Panel.object3D!.visible = false;
       return;
     }
@@ -910,10 +1141,19 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
 
   // Begin the opening sequence.
   // ==========================================================================
-  // STAGE 1 MONEY PLAN  —  opens at the Bank, after you have talked with Gus.
-  // Each plan splits the same $30 a different way and moves the three meters
-  // to match. Saving builds Security; the bank also grows your money.
+  // MORNING SETUP  —  opens at the counter, after you have talked with Ms. Delia.
+  // Two tap choices (pricing, then stocking) move Profit and Satisfaction; then
+  // Open the Doors advances the day to Midday.
   // ==========================================================================
+  // Morning setup deltas (tunable). Profit and Satisfaction drift with each call.
+  const MORNING = {
+    PRICE_PREMIUM: { profit: 12, satisfaction: -8 },
+    PRICE_FAIR:    { profit: 6,  satisfaction: 6 },
+    PRICE_BARGAIN: { profit: -4, satisfaction: 12 },
+    STOCK_FANCY:   { profit: 12, satisfaction: -4 },
+    STOCK_MIX:     { profit: 6,  satisfaction: 6 },
+    STOCK_BULK:    { profit: -2, satisfaction: 12 },
+  };
   const stage1MoneyPanel = world
     .createTransformEntity()
     .addComponent(PanelUI, { config: "./ui/stage1-money.json", maxWidth: 2.6, maxHeight: 2.0 })
@@ -923,106 +1163,53 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
 
   let stage1MoneyDone = false;      // true once the plan is chosen and reviewed
   let stage1ShowingOutcome = false; // true while the result is on screen
-  let stage1PlanChosen = false;     // guards against a fast double-tap re-scoring
 
   whenPanelReady(stage1MoneyPanel, function (doc) {
-    const beatPlan = doc.getElementById("beat-plan");
-    const beatOutcome = doc.getElementById("beat-outcome");
-    const resultSpend = doc.getElementById("result-spend");
-    const resultPiggy = doc.getElementById("result-piggy");
-    const resultBank = doc.getElementById("result-bank");
-    const resultTakeaway = doc.getElementById("result-takeaway");
+    const beatPrice = doc.getElementById("beat-price");
+    const beatStock = doc.getElementById("beat-stock");
+    const beatReady = doc.getElementById("beat-ready");
+    const readyText = doc.getElementById("ready-text");
 
-    // Start on the plan choice; hide the result.
-    beatPlan?.setProperties({ display: "flex" });
-    beatOutcome?.setProperties({ display: "none" });
+    beatPrice?.setProperties({ display: "flex" });
+    beatStock?.setProperties({ display: "none" });
+    beatReady?.setProperties({ display: "none" });
 
-    // ---- Tap-the-jar budgeting: drop $5 at a time into Spend, Save, or Bank ----
-    const COIN = 5; // each tap is $5
-    let coinsLeft = ECON.STARTING_MONEY + ECON.ALLOWANCE_PER_WEEK; // $30 to split
-    let spent = 0;
-    let piggy = 0;
-    let banked = 0;
+    let pricePicked = false;
+    let stockPicked = false;
+    const totals = { satisfaction: 0, profit: 0 };
 
-    const coinsLeftEl = doc.getElementById("coins-left");
-    const jarSpendEl = doc.getElementById("jar-spend-amt");
-    const jarSaveEl = doc.getElementById("jar-save-amt");
-    const jarBankEl = doc.getElementById("jar-bank-amt");
-    const doneBtn = doc.getElementById("jars-done");
-
-    function refreshJars() {
-      coinsLeftEl?.setProperties({ text: "Money left to split: $" + coinsLeft });
-      jarSpendEl?.setProperties({ text: "$" + spent });
-      jarSaveEl?.setProperties({ text: "$" + piggy });
-      jarBankEl?.setProperties({ text: "$" + banked });
-      // Light up Done only once every coin is placed.
-      if (coinsLeft === 0) doneBtn?.setProperties({ backgroundColor: "#c8962a" });
-      else doneBtn?.setProperties({ backgroundColor: "#c9c2b5" });
-    }
-    refreshJars();
-
-    // Drop one $5 coin. Spending lowers Your Money now; saving and banking keep it.
-    function dropCoin(where: string) {
-      if (coinsLeft === 0) return;
-      coinsLeft = coinsLeft - COIN;
-      if (where === "spend") {
-        spent = spent + COIN;
-        changeMoney(-COIN); // the money you spend leaves your pocket
-      } else if (where === "save") {
-        piggy = piggy + COIN; // safe at home, you still have it
-      } else {
-        banked = banked + COIN; // safe in the bank, and it will grow
-      }
+    function applyChoice(d: { profit: number; satisfaction: number }) {
+      updateScore("profit", d.profit);
+      updateScore("satisfaction", d.satisfaction);
+      totals.profit += d.profit;
+      totals.satisfaction += d.satisfaction;
       sfxCoin();
-      refreshJars();
     }
 
-    doc.getElementById("jar-spend")?.setProperties({ onClick: function () { dropCoin("spend"); } });
-    doc.getElementById("jar-save")?.setProperties({ onClick: function () { dropCoin("save"); } });
-    doc.getElementById("jar-bank")?.setProperties({ onClick: function () { dropCoin("bank"); } });
+    function pickPrice(d: { profit: number; satisfaction: number }) {
+      if (pricePicked) return;
+      pricePicked = true;
+      applyChoice(d);
+      beatPrice?.setProperties({ display: "none" });
+      beatStock?.setProperties({ display: "flex" });
+    }
+    doc.getElementById("price-premium")?.setProperties({ onClick: function () { pickPrice(MORNING.PRICE_PREMIUM); } });
+    doc.getElementById("price-fair")?.setProperties({ onClick: function () { pickPrice(MORNING.PRICE_FAIR); } });
+    doc.getElementById("price-bargain")?.setProperties({ onClick: function () { pickPrice(MORNING.PRICE_BARGAIN); } });
 
-    // Done: only after every coin is placed. Reveal the week, move the meters,
-    // and let the bank money grow with interest.
-    doneBtn?.setProperties({
-      onClick: function () {
-        if (coinsLeft !== 0) return; // still coins to place
-        sfxStage();
-
-        // Banking drives growth; saved money builds security; balance is smart.
-        const growthGain = Math.round(banked * 1.1);
-        const securityGain = Math.round((piggy + banked) * 0.55);
-        let smartsGain = 4;
-        if (banked > 0) smartsGain = smartsGain + 6;
-        if (piggy + banked >= 20) smartsGain = smartsGain + 4;
-        updateScore("growth", growthGain);
-        updateScore("security", securityGain);
-        updateScore("smarts", smartsGain);
-
-        // The bank money grows with interest (Your Money ticks up).
-        const interest = Math.round(banked * ECON.SAVINGS_INTEREST_RATE);
-        if (interest > 0) changeMoney(interest);
-
-        resultSpend?.setProperties({ text: "You spent $" + spent + " on things you wanted." });
-        resultPiggy?.setProperties({ text: "Your piggy bank holds $" + piggy + ", safe at home." });
-        if (banked > 0) {
-          resultBank?.setProperties({ text: "Your $" + banked + " in the bank grew to $" + (banked + interest) + ". The extra is interest, money you earn just for saving." });
-        } else {
-          resultBank?.setProperties({ text: "You put nothing in the bank, so nothing grew this week." });
-        }
-
-        let take = "Spending is fun! Saving a bit more would help your money grow.";
-        if (piggy + banked >= 20) take = "Very safe! Putting some money in the bank grows it, too.";
-        if (banked >= 5) {
-          if (spent >= 5) take = "Great balance. You spent a little, saved a little, and grew a little.";
-        }
-        resultTakeaway?.setProperties({ text: take });
-
-        // Swap to the result view (the Continue button below takes it from here).
-        beatPlan?.setProperties({ display: "none" });
-        beatOutcome?.setProperties({ display: "flex" });
-        stage1ShowingOutcome = true;
-      },
-    });
+    function pickStock(d: { profit: number; satisfaction: number }) {
+      if (stockPicked) return;
+      stockPicked = true;
+      applyChoice(d);
+      readyText?.setProperties({ text: activeShop.morning.readyText });
+      showMeterChanges(doc, totals.satisfaction, totals.profit, 0);
+      beatStock?.setProperties({ display: "none" });
+      beatReady?.setProperties({ display: "flex" });
+      stage1ShowingOutcome = true;
+    }
+    doc.getElementById("stock-fancy")?.setProperties({ onClick: function () { pickStock(MORNING.STOCK_FANCY); } });
+    doc.getElementById("stock-mix")?.setProperties({ onClick: function () { pickStock(MORNING.STOCK_MIX); } });
+    doc.getElementById("stock-bulk")?.setProperties({ onClick: function () { pickStock(MORNING.STOCK_BULK); } });
 
     doc.getElementById("continue-button")?.setProperties({
       onClick: function () {
@@ -1030,9 +1217,9 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
         stage1MoneyDone = true;
         stage1ShowingOutcome = false;
         stage1MoneyPanel.object3D!.visible = false;
-        showPhase(PHASE_S2);
-        setStageLook(world, "stage2");
-        setObjective("You are older now! Go find Gus to talk about your first paycheck.");
+        showPhase(PHASE_MIDDAY);
+        setStageLook(world, "midday");
+        setObjective(activeShop.goals.middayFind);
       },
     });
   });
@@ -1045,7 +1232,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       stage1MoneyPanel.object3D!.visible = false;
       return;
     }
-    if (currentPhase !== PHASE_S1) {
+    if (currentPhase !== PHASE_MORNING) {
       stage1MoneyPanel.object3D!.visible = false;
       return;
     }
@@ -1092,9 +1279,11 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       if (answered) return;
       answered = true;
       sfxCoin();
-      updateScore("smarts", isBest ? SMARTS_BEST : SMARTS_OK);
-      const lesson = "Smart investors put in some money, not all of it. If an investment drops, you still have savings to fall back on. Let's see how you do!";
+      const instinctGain = isBest ? SMARTS_BEST : SMARTS_OK;
+      updateScore("instinct", instinctGain);
+      const lesson = activeShop.midday.gusLesson;
       replyText?.setProperties({ text: opener + " " + lesson });
+      doc.getElementById("meter-change")?.setProperties({ text: "Owner's Instinct  +" + instinctGain });
       beatQ?.setProperties({ display: "none" });
       beatReply?.setProperties({ display: "flex" });
       gusQ2Replying = true;
@@ -1110,7 +1299,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
         gusQ2Done = true;
         gusQ2Replying = false;
         gusQ2Panel.object3D!.visible = false;
-        setObjective("Now head to the Business lot to invest your paycheck.");
+        setObjective(activeShop.goals.middayFloor);
       },
     });
   });
@@ -1118,7 +1307,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   const gusQ2CamPos = new Vector3();
   setInterval(function () {
     if (gusQ2Done) { gusQ2Panel.object3D!.visible = false; return; }
-    if (currentPhase !== PHASE_S2) { gusQ2Panel.object3D!.visible = false; return; }
+    if (currentPhase !== PHASE_MIDDAY) { gusQ2Panel.object3D!.visible = false; return; }
     if (gusQ2Replying) { showPanel(gusQ2Panel); return; }
     const cam = world.camera;
     if (!cam) return;
@@ -1131,31 +1320,19 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   }, 33);
 
   // ==========================================================================
-  // STAGE 2 INVEST BOARD  —  opens at the Business lot, after Gus's Stage 2
-  // question. The decision sets Security and Smarts. The random good or bad
-  // outcome sets Growth, and only the all-in plan can lose ground.
+  // MIDDAY RUSH  —  opens at your shop floor, after Ms. Delia's Midday question.
+  // Two tap choices: the Cary Street rival's deal, then the burnt-loaf complaint,
+  // ending in an "Into the Afternoon" button. The rival judgment moves Owner's
+  // Instinct; Profit and Satisfaction drift with the choices.
   // ==========================================================================
-  const STAGE2_PLANS: any = {
-    safe: {
-      key: "safe",
-      invest: 0, save: 100,
-      security: 12, smarts: 6, growthGood: 0, growthBad: 0,
-      takeawaySafe: "Saving keeps you secure! Investing a little could help your money grow more.",
-    },
-    some: {
-      key: "some",
-      invest: 40, save: 60,
-      security: 10, smarts: 14, growthGood: 14, growthBad: 0,
-      takeawayGood: "Smart move! You grew some money and kept plenty safe.",
-      takeawayBad: "Investing has ups and downs. Risking only a little kept you safe.",
-    },
-    lots: {
-      key: "lots",
-      invest: 80, save: 20,
-      security: 3, smarts: 6, growthGood: 18, growthBad: -5,
-      takeawayGood: "Big reward this time! But investing almost everything is a gamble.",
-      takeawayBad: "Risking almost everything can really hurt. Keep more money safe next time.",
-    },
+  // Midday deltas (tunable). Instinct moves on the rival judgment; Profit and Satisfaction drift.
+  const MIDDAY = {
+    RIVAL_HOLD:   { instinct: 10, profit: 6 },
+    RIVAL_MATCH:  { instinct: 0,  profit: -8 },
+    RIVAL_IGNORE: { instinct: 0,  profit: 0 },
+    COMPLAINT_FREE:     { satisfaction: 12, profit: -2 },
+    COMPLAINT_DISCOUNT: { satisfaction: 4,  profit: 0 },
+    COMPLAINT_FIRM:     { satisfaction: -8, profit: 2 },
   };
 
   const stage2Panel = world
@@ -1167,56 +1344,53 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
 
   let stage2Done = false;
   let stage2ShowingOutcome = false;
-  let stage2PlanChosen = false;     // guards against a fast double-tap re-scoring
 
   whenPanelReady(stage2Panel, function (doc) {
-    const beatPlan = doc.getElementById("beat-plan");
-    const beatOutcome = doc.getElementById("beat-outcome");
-    const resultInvest = doc.getElementById("result-invest");
-    const resultSave = doc.getElementById("result-save");
-    const resultTakeaway = doc.getElementById("result-takeaway");
+    const beatRival = doc.getElementById("beat-rival");
+    const beatComplaint = doc.getElementById("beat-complaint");
+    const beatDone = doc.getElementById("beat-done");
+    const doneText = doc.getElementById("done-text");
 
-    beatPlan?.setProperties({ display: "flex" });
-    beatOutcome?.setProperties({ display: "none" });
+    beatRival?.setProperties({ display: "flex" });
+    beatComplaint?.setProperties({ display: "none" });
+    beatDone?.setProperties({ display: "none" });
 
-    function choosePlan(plan: any) {
-      if (stage2PlanChosen) return; // a second tap must not score twice
-      stage2PlanChosen = true;
-      stage2Choice = plan.key;      // remembered for the final money personality
+    let rivalPicked = false;
+    let complaintPicked = false;
+    const totals = { satisfaction: 0, profit: 0, instinct: 0 };
+
+    function pickRival(d: { instinct: number; profit: number }) {
+      if (rivalPicked) return;
+      rivalPicked = true;
+      updateScore("instinct", d.instinct);
+      updateScore("profit", d.profit);
+      totals.instinct += d.instinct;
+      totals.profit += d.profit;
       sfxCoin();
-      // Decide the outcome by chance, then apply the meters.
-      const isGood = ECON.INVEST_GOOD_PROBABILITY > Math.random();
-      updateScore("security", plan.security);
-      updateScore("smarts", plan.smarts);
-      updateScore("growth", isGood ? plan.growthGood : plan.growthBad);
+      beatRival?.setProperties({ display: "none" });
+      beatComplaint?.setProperties({ display: "flex" });
+    }
+    doc.getElementById("rival-hold")?.setProperties({ onClick: function () { pickRival(MIDDAY.RIVAL_HOLD); } });
+    doc.getElementById("rival-match")?.setProperties({ onClick: function () { pickRival(MIDDAY.RIVAL_MATCH); } });
+    doc.getElementById("rival-ignore")?.setProperties({ onClick: function () { pickRival(MIDDAY.RIVAL_IGNORE); } });
 
-      if (plan.invest > 0) {
-        const mult = isGood ? ECON.INVEST_GOOD_MULTIPLIER : ECON.INVEST_BAD_MULTIPLIER;
-        const result = Math.round(plan.invest * mult);
-        const diff = Math.abs(result - plan.invest);
-        changeMoney(result - plan.invest); // Your Money rises on a gain, falls on a loss
-        if (isGood) {
-          resultInvest?.setProperties({ text: "You invested $" + plan.invest + ", and it grew to $" + result + "! You earned $" + diff + "." });
-          resultTakeaway?.setProperties({ text: plan.takeawayGood });
-        } else {
-          resultInvest?.setProperties({ text: "You invested $" + plan.invest + ", and it dropped to $" + result + ". You lost $" + diff + " this time." });
-          resultTakeaway?.setProperties({ text: plan.takeawayBad });
-        }
-        resultSave?.setProperties({ text: "You kept $" + plan.save + " safe in savings." });
-      } else {
-        resultInvest?.setProperties({ text: "You did not invest this time." });
-        resultSave?.setProperties({ text: "You saved all $" + plan.save + ". It is safe, but it did not grow much." });
-        resultTakeaway?.setProperties({ text: plan.takeawaySafe });
-      }
-
-      beatPlan?.setProperties({ display: "none" });
-      beatOutcome?.setProperties({ display: "flex" });
+    function pickComplaint(d: { satisfaction: number; profit: number }) {
+      if (complaintPicked) return;
+      complaintPicked = true;
+      updateScore("satisfaction", d.satisfaction);
+      updateScore("profit", d.profit);
+      totals.satisfaction += d.satisfaction;
+      totals.profit += d.profit;
+      sfxCoin();
+      doneText?.setProperties({ text: activeShop.midday.doneText });
+      showMeterChanges(doc, totals.satisfaction, totals.profit, totals.instinct);
+      beatComplaint?.setProperties({ display: "none" });
+      beatDone?.setProperties({ display: "flex" });
       stage2ShowingOutcome = true;
     }
-
-    doc.getElementById("card-safe")?.setProperties({ onClick: function () { choosePlan(STAGE2_PLANS.safe); } });
-    doc.getElementById("card-some")?.setProperties({ onClick: function () { choosePlan(STAGE2_PLANS.some); } });
-    doc.getElementById("card-lots")?.setProperties({ onClick: function () { choosePlan(STAGE2_PLANS.lots); } });
+    doc.getElementById("comp-free")?.setProperties({ onClick: function () { pickComplaint(MIDDAY.COMPLAINT_FREE); } });
+    doc.getElementById("comp-discount")?.setProperties({ onClick: function () { pickComplaint(MIDDAY.COMPLAINT_DISCOUNT); } });
+    doc.getElementById("comp-firm")?.setProperties({ onClick: function () { pickComplaint(MIDDAY.COMPLAINT_FIRM); } });
 
     doc.getElementById("continue-button")?.setProperties({
       onClick: function () {
@@ -1224,9 +1398,9 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
         stage2Done = true;
         stage2ShowingOutcome = false;
         stage2Panel.object3D!.visible = false;
-        showPhase(PHASE_S3);
-        setStageLook(world, "stage3");
-        setObjective("You have saved up a lot! Find Gus for one last big lesson.");
+        showPhase(PHASE_AFTERNOON);
+        setStageLook(world, "afternoon");
+        setObjective(activeShop.goals.afternoonFind);
       },
     });
   });
@@ -1235,7 +1409,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   const bizCamPos = new Vector3();
   setInterval(function () {
     if (stage2Done) { stage2Panel.object3D!.visible = false; return; }
-    if (currentPhase !== PHASE_S2) { stage2Panel.object3D!.visible = false; return; }
+    if (currentPhase !== PHASE_MIDDAY) { stage2Panel.object3D!.visible = false; return; }
     if (!gusQ2Done) { stage2Panel.object3D!.visible = false; return; }
     if (stage2ShowingOutcome) { showPanel(stage2Panel); return; }
     const cam = world.camera;
@@ -1273,9 +1447,11 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       if (answered) return;
       answered = true;
       sfxCoin();
-      updateScore("smarts", isBest ? SMARTS_BEST : SMARTS_OK);
-      const lesson = "Spreading your money across different places is called diversifying. If one place has a problem, the others keep you safe. Let's see how you do!";
+      const instinctGain = isBest ? SMARTS_BEST : SMARTS_OK;
+      updateScore("instinct", instinctGain);
+      const lesson = activeShop.afternoon.gusLesson;
       replyText?.setProperties({ text: opener + " " + lesson });
+      doc.getElementById("meter-change")?.setProperties({ text: "Owner's Instinct  +" + instinctGain });
       beatQ?.setProperties({ display: "none" });
       beatReply?.setProperties({ display: "flex" });
       gusQ3Replying = true;
@@ -1291,7 +1467,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
         gusQ3Done = true;
         gusQ3Replying = false;
         gusQ3Panel.object3D!.visible = false;
-        setObjective("Now go to the Bank to make your final plan.");
+        setObjective(activeShop.goals.closeCounter);
       },
     });
   });
@@ -1299,7 +1475,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   const gusQ3CamPos = new Vector3();
   setInterval(function () {
     if (gusQ3Done) { gusQ3Panel.object3D!.visible = false; return; }
-    if (currentPhase !== PHASE_S3) { gusQ3Panel.object3D!.visible = false; return; }
+    if (currentPhase !== PHASE_AFTERNOON) { gusQ3Panel.object3D!.visible = false; return; }
     if (gusQ3Replying) { showPanel(gusQ3Panel); return; }
     const cam = world.camera;
     if (!cam) return;
@@ -1312,30 +1488,18 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   }, 33);
 
   // ==========================================================================
-  // STAGE 3 SPREAD BOARD  —  opens at the Bank, after Gus's Stage 3 question.
-  // Spreading money across more places keeps you secure when the surprise
-  // expense hits. The choice sets all three meters. The all-in plan, with
-  // nowhere safe to turn, actually loses Security.
+  // AFTERNOON CLOSE  —  opens at your counter, after Ms. Delia's question.
+  // Two quick calls (leftover stock, then a big-order quote) nudge Profit and
+  // Satisfaction, then a See Your Day button hands off to the report.
   // ==========================================================================
-  const STAGE3_PLANS: any = {
-    one: {
-      key: "one",
-      security: -3, growth: 3, smarts: 0,
-      surprise: "Ouch! All your money was in one place. To pay the $30, you had to pull from your only investment at a bad time.",
-      takeaway: "Keeping everything in one place is risky. Spreading it out protects you.",
-    },
-    two: {
-      key: "two",
-      security: 8, growth: 8, smarts: 9,
-      surprise: "Not bad! With your money in two places, you covered the $30 without much trouble.",
-      takeaway: "Two places is safer than one. Even more places would protect you better.",
-    },
-    three: {
-      key: "three",
-      security: 14, growth: 12, smarts: 14,
-      surprise: "Perfect! Your money was spread across three places, so paying the $30 was easy. One small dip did not hurt the rest.",
-      takeaway: "Spreading your money out kept you safe and growing. That is diversifying!",
-    },
+  // Afternoon deltas (tunable). Profit and Satisfaction drift with each close-out call.
+  const AFTERNOON = {
+    CLOSE_DONATE:   { satisfaction: 10, profit: -2 },
+    CLOSE_MARKDOWN: { satisfaction: 4,  profit: 8 },
+    CLOSE_TOSS:     { satisfaction: -6, profit: 0 },
+    ORDER_PREMIUM:  { profit: 12, satisfaction: -4 },
+    ORDER_FAIR:     { profit: 6,  satisfaction: 6 },
+    ORDER_FRIENDLY: { profit: -2, satisfaction: 12 },
   };
 
   const stage3Panel = world
@@ -1346,50 +1510,54 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   stage3Panel.object3D!.visible = false;
 
   let stage3Done = false;
-  let stage3Engaged = false; // true from choosing a plan through the result
-  let stage3Plan: any = null;
-  let stage3Scored = false;  // guards against a fast double-tap re-scoring
+  let stage3Engaged = false; // true from the first close-out call until See Your Day
 
   whenPanelReady(stage3Panel, function (doc) {
-    const beatPlan = doc.getElementById("beat-plan");
-    const beatSurprise = doc.getElementById("beat-surprise");
-    const beatOutcome = doc.getElementById("beat-outcome");
-    const resultSurprise = doc.getElementById("result-surprise");
-    const resultTakeaway = doc.getElementById("result-takeaway");
+    const beatStock = doc.getElementById("beat-stock");
+    const beatOrder = doc.getElementById("beat-order");
+    const beatDone = doc.getElementById("beat-done");
+    const doneText = doc.getElementById("done-text");
 
-    beatPlan?.setProperties({ display: "flex" });
-    beatSurprise?.setProperties({ display: "none" });
-    beatOutcome?.setProperties({ display: "none" });
+    beatStock?.setProperties({ display: "flex" });
+    beatOrder?.setProperties({ display: "none" });
+    beatDone?.setProperties({ display: "none" });
 
-    // Pick a plan, then the surprise lands.
-    function choosePlan(plan: any) {
-      sfxClick();
-      stage3Plan = plan;
-      stage3Choice = plan.key;   // remembered for the final money personality
+    let stockPicked = false;
+    let orderPicked = false;
+    const totals = { satisfaction: 0, profit: 0, instinct: 0 };
+
+    function pickStock(d: { satisfaction: number; profit: number }) {
+      if (stockPicked) return;
+      stockPicked = true;
+      updateScore("satisfaction", d.satisfaction);
+      updateScore("profit", d.profit);
+      totals.satisfaction += d.satisfaction;
+      totals.profit += d.profit;
+      sfxCoin();
       stage3Engaged = true;
-      beatPlan?.setProperties({ display: "none" });
-      beatSurprise?.setProperties({ display: "flex" });
+      beatStock?.setProperties({ display: "none" });
+      beatOrder?.setProperties({ display: "flex" });
     }
+    doc.getElementById("close-donate")?.setProperties({ onClick: function () { pickStock(AFTERNOON.CLOSE_DONATE); } });
+    doc.getElementById("close-markdown")?.setProperties({ onClick: function () { pickStock(AFTERNOON.CLOSE_MARKDOWN); } });
+    doc.getElementById("close-toss")?.setProperties({ onClick: function () { pickStock(AFTERNOON.CLOSE_TOSS); } });
 
-    doc.getElementById("card-one")?.setProperties({ onClick: function () { choosePlan(STAGE3_PLANS.one); } });
-    doc.getElementById("card-two")?.setProperties({ onClick: function () { choosePlan(STAGE3_PLANS.two); } });
-    doc.getElementById("card-three")?.setProperties({ onClick: function () { choosePlan(STAGE3_PLANS.three); } });
-
-    // Reveal how the plan handled the surprise, and move the meters.
-    doc.getElementById("see-button")?.setProperties({
-      onClick: function () {
-        if (!stage3Plan || stage3Scored) return; // a second tap must not score twice
-        stage3Scored = true;
-        sfxCoin();
-        updateScore("security", stage3Plan.security);
-        updateScore("growth", stage3Plan.growth);
-        updateScore("smarts", stage3Plan.smarts);
-        resultSurprise?.setProperties({ text: stage3Plan.surprise });
-        resultTakeaway?.setProperties({ text: stage3Plan.takeaway });
-        beatSurprise?.setProperties({ display: "none" });
-        beatOutcome?.setProperties({ display: "flex" });
-      },
-    });
+    function pickOrder(d: { profit: number; satisfaction: number }) {
+      if (orderPicked) return;
+      orderPicked = true;
+      updateScore("profit", d.profit);
+      updateScore("satisfaction", d.satisfaction);
+      totals.profit += d.profit;
+      totals.satisfaction += d.satisfaction;
+      sfxCoin();
+      doneText?.setProperties({ text: activeShop.afternoon.doneText });
+      showMeterChanges(doc, totals.satisfaction, totals.profit, totals.instinct);
+      beatOrder?.setProperties({ display: "none" });
+      beatDone?.setProperties({ display: "flex" });
+    }
+    doc.getElementById("order-premium")?.setProperties({ onClick: function () { pickOrder(AFTERNOON.ORDER_PREMIUM); } });
+    doc.getElementById("order-fair")?.setProperties({ onClick: function () { pickOrder(AFTERNOON.ORDER_FAIR); } });
+    doc.getElementById("order-friendly")?.setProperties({ onClick: function () { pickOrder(AFTERNOON.ORDER_FRIENDLY); } });
 
     doc.getElementById("continue-button")?.setProperties({
       onClick: function () {
@@ -1406,7 +1574,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   const bank3CamPos = new Vector3();
   setInterval(function () {
     if (stage3Done) { stage3Panel.object3D!.visible = false; return; }
-    if (currentPhase !== PHASE_S3) { stage3Panel.object3D!.visible = false; return; }
+    if (currentPhase !== PHASE_AFTERNOON) { stage3Panel.object3D!.visible = false; return; }
     if (!gusQ3Done) { stage3Panel.object3D!.visible = false; return; }
     if (stage3Engaged) { showPanel(stage3Panel); return; }
     const cam = world.camera;
@@ -1423,26 +1591,30 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   // MONEY REPORT  —  the finale. Reads the three meters, names the money
   // personality, greets the chosen explorer, and offers Play Again.
   // ==========================================================================
-  const PERSONALITIES: any = {
-    bold: {
-      name: "Bold Investor",
-      blurb: "You love to grow your money and you are not afraid to take a chance. Just remember to keep some savings safe, too!",
+  const OWNER_TYPES: Record<string, { name: string; blurb: string }> = {
+    bossMaterial: {
+      name: "Boss Material",
+      blurb: "You kept customers happy, the money strong, and your gut in charge, all at once. That is the whole package. The bakery is lucky to have you.",
     },
-    saver: {
-      name: "Careful Saver",
-      blurb: "You keep your money safe and steady. Saving is a real strength! Try investing a little to help it grow even more.",
+    crowdPleaser: {
+      name: "The Crowd-Pleaser",
+      blurb: "Customers loved your bakery today. You put people first, and it showed. A happy, loyal crowd is worth its weight in gold.",
     },
-    diversifier: {
-      name: "Smart Diversifier",
-      blurb: "You make smart choices and spread your money around. That is a great way to stay safe and keep growing!",
+    dealMaker: {
+      name: "The Deal-Maker",
+      blurb: "You had a sharp eye for profit and made the money work. Every shop needs a boss who watches the bottom line, and that is you.",
     },
-    balanced: {
-      name: "Balanced Builder",
-      blurb: "You did a little of everything: spending, saving, and growing. Mixing it up is a great way to learn what works best for you!",
+    natural: {
+      name: "The Natural",
+      blurb: "You trusted your instincts and made smart calls all day. That kind of judgment is what turns a good bakery into a great one.",
     },
-    spender: {
-      name: "Free Spender",
-      blurb: "You love to enjoy your money right now, and that is okay! Try saving a little for later, too, so you are ready for a surprise.",
+    steadyHand: {
+      name: "The Steady Hand",
+      blurb: "You kept everything balanced and steady from open to close. No panic, no drama, just solid choices. That is how shops last.",
+    },
+    learningRopes: {
+      name: "Learning the Ropes",
+      blurb: "Running a bakery is hard work, and you gave it a real go today. Every great boss starts somewhere. Come back and try a few new moves!",
     },
   };
 
@@ -1452,7 +1624,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     .addComponent(Interactable);
   reportPanel.object3D!.position.set(STATIONS.bank.x, 1.6, STATIONS.bank.z + 2.2);
   reportPanel.object3D!.visible = false;
-  phasePanels[PHASE_REPORT] = reportPanel;
+  phasePanels[PHASE_CLOSE] = reportPanel;
 
   let reportDoc: any = null;
   whenPanelReady(reportPanel, function (doc) {
@@ -1467,46 +1639,48 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
 
   // Decide the money personality from the final meters, fill the card, show it.
   function showReport() {
-    const g = scoreGrowth;
-    const s = scoreSecurity;
-    const m = scoreSmarts;
+    const S = scoreSatisfaction;
+    const P = scoreProfit;
+    const I = scoreInstinct;
+    const avg = (S + P + I) / 3;
+    const hi = Math.max(S, P, I);
+    const lo = Math.min(S, P, I);
+    const spread = hi - lo;
 
-    // The money personality reflects the CHOICES the player actually made, in
-    // order from the most distinctive choice to the most general. This is why a
-    // player who spends can never be called a saver: each archetype is gated on
-    // a real decision, not on which meter bar happens to be taller.
-    let key = "balanced";
-    if (stage3Choice === "three") {
-      key = "diversifier";          // you spread your money out in the big decision
-    } else if (stage2Choice === "lots") {
-      key = "bold";                 // you invested almost all of your paycheck
-    } else if (stage1Choice === "spend") {
-      key = "spender";              // you chose to spend most of your money
-    } else if (stage1Choice === "safe" || stage2Choice === "safe") {
-      key = "saver";                // you kept your money safe instead of investing
+    let key: string;
+    if (avg < 45) {
+      key = "learningRopes";
+    } else if (spread <= 15 && avg >= 65) {
+      key = "bossMaterial";
+    } else if (spread <= 15) {
+      key = "steadyHand";
+    } else if (S === hi) {
+      key = "crowdPleaser";
+    } else if (P === hi) {
+      key = "dealMaker";
     } else {
-      key = "balanced";             // a steady little of everything (grow + some)
+      key = "natural";
     }
 
-    const p = PERSONALITIES[key];
-    const name = chosenCharacter ? chosenCharacter.name : "explorer";
+    const t = OWNER_TYPES[key];
+    const name = chosenCharacter ? chosenCharacter.name : "boss";
 
     if (reportDoc) {
-      reportDoc.getElementById("greeting")?.setProperties({ text: "Great job, " + name + "!" });
-      reportDoc.getElementById("personality-name")?.setProperties({ text: p.name });
-      reportDoc.getElementById("personality-blurb")?.setProperties({ text: p.blurb });
-      reportDoc.getElementById("value-growth")?.setProperties({ text: String(g) });
-      reportDoc.getElementById("value-security")?.setProperties({ text: String(s) });
-      reportDoc.getElementById("value-smarts")?.setProperties({ text: String(m) });
-      reportDoc.getElementById("fill-growth")?.setProperties({ width: Math.round(g * 0.4) });
-      reportDoc.getElementById("fill-security")?.setProperties({ width: Math.round(s * 0.4) });
-      reportDoc.getElementById("fill-smarts")?.setProperties({ width: Math.round(m * 0.4) });
+      reportDoc.getElementById("greeting")?.setProperties({ text: "Great work, " + name + "!" });
+      reportDoc.getElementById("personality-name")?.setProperties({ text: t.name });
+      reportDoc.getElementById("personality-blurb")?.setProperties({ text: t.blurb });
+      reportDoc.getElementById("value-growth")?.setProperties({ text: String(S) });
+      reportDoc.getElementById("value-security")?.setProperties({ text: String(P) });
+      reportDoc.getElementById("value-smarts")?.setProperties({ text: String(I) });
+      reportDoc.getElementById("fill-growth")?.setProperties({ width: Math.round(S * 0.4) });
+      reportDoc.getElementById("fill-security")?.setProperties({ width: Math.round(P * 0.4) });
+      reportDoc.getElementById("fill-smarts")?.setProperties({ width: Math.round(I * 0.4) });
     }
 
     sfxFanfare();
-    showPhase(PHASE_REPORT);
-    presentPanel(reportPanel); // place it comfortably in front, wherever you stand
-    setObjective("You did it! Here is your money report.");
+    showPhase(PHASE_CLOSE);
+    presentPanel(reportPanel);
+    setObjective("You ran the shop! Here is how your day went.");
   }
 
   // Watch all the story panels so the on-top loop keeps whichever is showing
@@ -1522,7 +1696,262 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     reportPanel,
   );
 
-  startOpening();
+  // ========================================================================
+  // SHOP PICKER — the first thing the player sees. The floor, walls, and sky
+  // are already built, so the player stands in an empty themed room. Tapping a
+  // shop sets the active pack, builds that shop's props, hides the picker, and
+  // runs the opening.
+  // ========================================================================
+  // A brief "setting up" card, shown between picking a shop and the shop appearing.
+  const loadingPanel = world
+    .createTransformEntity()
+    .addComponent(PanelUI, { config: "./ui/loading.json", maxWidth: 2.2, maxHeight: 1.4 })
+    .addComponent(Interactable);
+  loadingPanel.object3D!.position.set(0, 1.6, 4);
+  loadingPanel.object3D!.visible = false;
+
+  const shopPickerPanel = world
+    .createTransformEntity()
+    .addComponent(PanelUI, { config: "./ui/shop-picker.json", maxWidth: 2.8, maxHeight: 2.2 })
+    .addComponent(Interactable);
+  shopPickerPanel.object3D!.position.set(0, 1.6, 4);
+  shopPickerPanel.object3D!.visible = false;
+
+  whenPanelReady(shopPickerPanel, function (doc) {
+    // How long the "Setting up your shop..." card shows before the shop appears.
+    const SHOP_SETUP_MS = 1200;
+    function pick(id: ShopId) {
+      sfxClick();
+      setActiveShop(id);
+      shopPickerPanel.object3D!.visible = false;
+      loadingPanel.object3D!.visible = true;
+      setTimeout(function () {
+        // The shop appears now: reveal the shell, build this shop's fixtures,
+        // reword and recolor, and switch the sky from lobby to morning.
+        ground.object3D!.visible = true;
+        built.boundary.object3D!.visible = true;
+        for (const e of built.street) e.object3D!.visible = true;
+        buildShopProps(world, id);
+        applyShopWords(SHOPS[id]);
+        applyShopTheme(SHOPS[id]);
+        applyShopGameTheme(SHOPS[id]);
+        applyShopHudTheme(SHOPS[id]);
+        setStageLook(world, PHASE_MORNING);
+        loadingPanel.object3D!.visible = false;
+        startOpening();
+      }, SHOP_SETUP_MS);
+    }
+    doc.getElementById("shop-bakery")?.setProperties({ onClick: function () { pick("bakery"); } });
+    doc.getElementById("shop-surf")?.setProperties({ onClick: function () { pick("surf"); } });
+    doc.getElementById("shop-repair")?.setProperties({ onClick: function () { pick("repair"); } });
+  });
+
+  // The orientation screen shows first. Its button reveals the shop picker.
+  const introPanel = world
+    .createTransformEntity()
+    .addComponent(PanelUI, { config: "./ui/intro.json", maxWidth: 2.6, maxHeight: 2.5 })
+    .addComponent(Interactable);
+  introPanel.object3D!.position.set(0, 1.6, 4);
+  introPanel.object3D!.visible = false;
+  whenPanelReady(introPanel, function (doc) {
+    doc.getElementById("intro-continue")?.setProperties({
+      onClick: function () {
+        sfxClick();
+        introPanel.object3D!.visible = false;
+        shopPickerPanel.object3D!.visible = true;
+        setObjective("Choose the shop you want to run for the day.");
+      },
+    });
+  });
+
+  // Show the welcome screen first; the picker appears when they continue.
+  introPanel.object3D!.visible = true;
+
+  // ========================================================================
+  // SHOP WORDS — overwrite each panel's per-shop text from the chosen pack.
+  // Called once, the moment a shop is picked, so every panel shows that
+  // shop's words. The questions and activities get added here in 3b and 3c.
+  // ========================================================================
+  function applyShopWords(pack: ShopPack) {
+    whenPanelReady(titlePanel, function (doc) {
+      doc.getElementById("subtitle")?.setProperties({ text: pack.subtitle });
+    });
+    whenPanelReady(welcomePanel, function (doc) {
+      doc.getElementById("welcome-premise")?.setProperties({ text: pack.premise });
+      doc.getElementById("talk-title")?.setProperties({ text: "2. Talk to " + pack.ownerName });
+      doc.getElementById("talk-body")?.setProperties({
+        text: pack.ownerName + " has run this shop for years and knows every trick of the trade. When the gold ! appears over them, walk over. They will ask you a quick question to sharpen your Owner's Instinct.",
+      });
+    });
+
+    whenPanelReady(gusQ1Panel, function (doc) {
+      const q = pack.morning;
+      doc.getElementById("eyebrow-asks")?.setProperties({ text: pack.ownerName.toUpperCase() + " ASKS" });
+      doc.getElementById("eyebrow-says")?.setProperties({ text: pack.ownerName.toUpperCase() + " SAYS" });
+      doc.getElementById("q-text")?.setProperties({ text: q.gusQ });
+      doc.getElementById("answer-a-label")?.setProperties({ text: q.gusBest });
+      doc.getElementById("answer-b-label")?.setProperties({ text: q.gusB });
+      doc.getElementById("answer-c-label")?.setProperties({ text: q.gusC });
+    });
+
+    whenPanelReady(gusQ2Panel, function (doc) {
+      const q = pack.midday;
+      doc.getElementById("eyebrow-asks")?.setProperties({ text: pack.ownerName.toUpperCase() + " ASKS" });
+      doc.getElementById("eyebrow-says")?.setProperties({ text: pack.ownerName.toUpperCase() + " SAYS" });
+      doc.getElementById("q-text")?.setProperties({ text: q.gusQ });
+      doc.getElementById("answer-a-label")?.setProperties({ text: q.gusBest });
+      doc.getElementById("answer-b-label")?.setProperties({ text: q.gusB });
+      doc.getElementById("answer-c-label")?.setProperties({ text: q.gusC });
+    });
+
+    whenPanelReady(gusQ3Panel, function (doc) {
+      const q = pack.afternoon;
+      doc.getElementById("eyebrow-asks")?.setProperties({ text: pack.ownerName.toUpperCase() + " ASKS" });
+      doc.getElementById("eyebrow-says")?.setProperties({ text: pack.ownerName.toUpperCase() + " SAYS" });
+      doc.getElementById("q-text")?.setProperties({ text: q.gusQ });
+      doc.getElementById("answer-a-label")?.setProperties({ text: q.gusBest });
+      doc.getElementById("answer-b-label")?.setProperties({ text: q.gusB });
+      doc.getElementById("answer-c-label")?.setProperties({ text: q.gusC });
+    });
+
+    whenPanelReady(stage1MoneyPanel, function (doc) {
+      const q = pack.morning;
+      doc.getElementById("price-q")?.setProperties({ text: q.priceQ });
+      doc.getElementById("price-premium-label")?.setProperties({ text: q.priceP });
+      doc.getElementById("price-fair-label")?.setProperties({ text: q.priceF });
+      doc.getElementById("price-bargain-label")?.setProperties({ text: q.priceB });
+      doc.getElementById("stock-q")?.setProperties({ text: q.stockQ });
+      doc.getElementById("stock-fancy-label")?.setProperties({ text: q.stockFancy });
+      doc.getElementById("stock-mix-label")?.setProperties({ text: q.stockMix });
+      doc.getElementById("stock-bulk-label")?.setProperties({ text: q.stockBulk });
+    });
+
+    whenPanelReady(stage2Panel, function (doc) {
+      const q = pack.midday;
+      doc.getElementById("rival-q")?.setProperties({ text: q.rivalQ });
+      doc.getElementById("rival-hold-label")?.setProperties({ text: q.rivalHold });
+      doc.getElementById("rival-match-label")?.setProperties({ text: q.rivalMatch });
+      doc.getElementById("rival-ignore-label")?.setProperties({ text: q.rivalIgnore });
+      doc.getElementById("comp-q")?.setProperties({ text: q.compQ });
+      doc.getElementById("comp-free-label")?.setProperties({ text: q.compFree });
+      doc.getElementById("comp-discount-label")?.setProperties({ text: q.compDiscount });
+      doc.getElementById("comp-firm-label")?.setProperties({ text: q.compFirm });
+    });
+
+    whenPanelReady(stage3Panel, function (doc) {
+      const q = pack.afternoon;
+      doc.getElementById("close-q")?.setProperties({ text: q.leftoverQ });
+      doc.getElementById("close-donate-label")?.setProperties({ text: q.leftDonate });
+      doc.getElementById("close-markdown-label")?.setProperties({ text: q.leftMarkdown });
+      doc.getElementById("close-toss-label")?.setProperties({ text: q.leftToss });
+      doc.getElementById("order-q")?.setProperties({ text: q.orderQ });
+      doc.getElementById("order-premium-label")?.setProperties({ text: q.orderP });
+      doc.getElementById("order-fair-label")?.setProperties({ text: q.orderF });
+      doc.getElementById("order-friendly-label")?.setProperties({ text: q.orderFriendly });
+    });
+  }
+
+  // ========================================================================
+  // SHOP THEME — paint the onboarding cards (title, welcome, character pick)
+  // in the chosen shop's colors. Same idea as applyShopWords, but for color.
+  // ========================================================================
+  function applyShopTheme(pack: ShopPack) {
+    const t = pack.theme;
+    whenPanelReady(titlePanel, function (doc) {
+      doc.getElementById("title-panel")?.setProperties({ backgroundColor: t.panelBg, borderColor: t.panelBorder });
+      doc.getElementById("title-text")?.setProperties({ color: t.ink });
+      doc.getElementById("subtitle")?.setProperties({ color: t.ink });
+      doc.getElementById("start-button")?.setProperties({ backgroundColor: t.accent });
+      doc.getElementById("start-label")?.setProperties({ color: t.accentInk });
+    });
+    whenPanelReady(welcomePanel, function (doc) {
+      doc.getElementById("welcome-panel")?.setProperties({ backgroundColor: t.panelBg, borderColor: t.panelBorder });
+      doc.getElementById("welcome-eyebrow")?.setProperties({ color: t.ink });
+      doc.getElementById("welcome-heading")?.setProperties({ color: t.ink });
+      for (const sid of ["step-1", "step-2", "step-3", "step-4", "step-5"]) {
+        doc.getElementById(sid)?.setProperties({ backgroundColor: t.boxBg, borderColor: t.boxBorder });
+      }
+      doc.getElementById("next-button")?.setProperties({ backgroundColor: t.accent });
+      doc.getElementById("next-label")?.setProperties({ color: t.accentInk });
+    });
+    whenPanelReady(setupPanel, function (doc) {
+      doc.getElementById("setup-panel")?.setProperties({ backgroundColor: t.panelBg, borderColor: t.panelBorder });
+      doc.getElementById("setup-heading")?.setProperties({ color: t.ink });
+      for (const cid of ["card-ada", "card-leo", "card-mia", "card-sam"]) {
+        doc.getElementById(cid)?.setProperties({ backgroundColor: t.boxBg });
+      }
+    });
+  }
+
+  // ====================================================================
+  // SHOP GAME THEME - paint the question, activity, and report panels in
+  // the chosen shop's colors, including the bakery.
+  // ====================================================================
+  function applyShopGameTheme(pack: ShopPack) {
+    const t = pack.theme;
+
+    // The owner's three question panels (morning, midday, afternoon).
+    for (const panel of [gusQ1Panel, gusQ2Panel, gusQ3Panel]) {
+      whenPanelReady(panel, function (doc) {
+        doc.getElementById("game-panel")?.setProperties({ backgroundColor: t.panelBg, borderColor: t.panelBorder });
+        for (const aid of ["answer-a", "answer-b", "answer-c"]) {
+          doc.getElementById(aid)?.setProperties({ backgroundColor: t.boxBg, borderColor: t.boxBorder });
+        }
+        for (const tid of ["q-text", "answer-a-label", "answer-b-label", "answer-c-label", "reply-text"]) {
+          doc.getElementById(tid)?.setProperties({ color: t.ink });
+        }
+      });
+    }
+
+    // Morning activity panel: pricing and stocking.
+    whenPanelReady(stage1MoneyPanel, function (doc) {
+      doc.getElementById("game-panel")?.setProperties({ backgroundColor: t.panelBg, borderColor: t.panelBorder });
+      for (const aid of ["price-premium", "price-fair", "price-bargain", "stock-fancy", "stock-mix", "stock-bulk"]) {
+        doc.getElementById(aid)?.setProperties({ backgroundColor: t.boxBg, borderColor: t.boxBorder });
+      }
+      for (const tid of ["price-q", "stock-q", "price-premium-label", "price-fair-label", "price-bargain-label", "stock-fancy-label", "stock-mix-label", "stock-bulk-label", "ready-text"]) {
+        doc.getElementById(tid)?.setProperties({ color: t.ink });
+      }
+    });
+
+    // Midday activity panel: rival and complaint.
+    whenPanelReady(stage2Panel, function (doc) {
+      doc.getElementById("game-panel")?.setProperties({ backgroundColor: t.panelBg, borderColor: t.panelBorder });
+      for (const aid of ["rival-hold", "rival-match", "rival-ignore", "comp-free", "comp-discount", "comp-firm"]) {
+        doc.getElementById(aid)?.setProperties({ backgroundColor: t.boxBg, borderColor: t.boxBorder });
+      }
+      for (const tid of ["rival-q", "comp-q", "rival-hold-label", "rival-match-label", "rival-ignore-label", "comp-free-label", "comp-discount-label", "comp-firm-label", "done-text"]) {
+        doc.getElementById(tid)?.setProperties({ color: t.ink });
+      }
+    });
+
+    // Afternoon activity panel: leftovers and the big order.
+    whenPanelReady(stage3Panel, function (doc) {
+      doc.getElementById("game-panel")?.setProperties({ backgroundColor: t.panelBg, borderColor: t.panelBorder });
+      for (const aid of ["close-donate", "close-markdown", "close-toss", "order-premium", "order-fair", "order-friendly"]) {
+        doc.getElementById(aid)?.setProperties({ backgroundColor: t.boxBg, borderColor: t.boxBorder });
+      }
+      for (const tid of ["close-q", "order-q", "close-donate-label", "close-markdown-label", "close-toss-label", "order-premium-label", "order-fair-label", "order-friendly-label", "done-text"]) {
+        doc.getElementById(tid)?.setProperties({ color: t.ink });
+      }
+    });
+
+    // End-of-day report card (meters keep their own colors).
+    whenPanelReady(reportPanel, function (doc) {
+      doc.getElementById("report-card")?.setProperties({ backgroundColor: t.panelBg, borderColor: t.panelBorder });
+      for (const tid of ["greeting", "personality-name", "personality-blurb"]) {
+        doc.getElementById(tid)?.setProperties({ color: t.ink });
+      }
+    });
+
+    // In-headset dashboard (the bars, money, and objective keep their own colors).
+    whenPanelReady(dashboardPanel, function (doc) {
+      doc.getElementById("dash-panel")?.setProperties({ backgroundColor: t.panelBg, borderColor: t.panelBorder });
+      for (const tid of ["dash-title", "dash-label-sat", "dash-label-profit", "dash-label-instinct", "dash-val-sat", "dash-val-profit", "dash-val-instinct"]) {
+        doc.getElementById(tid)?.setProperties({ color: t.ink });
+      }
+    });
+  }
 
   // Log the economic constants once so we can confirm they loaded.
   console.log("[Money Moves] economic constants loaded", ECON);

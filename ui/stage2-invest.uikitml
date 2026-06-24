@@ -1,46 +1,45 @@
-<!-- Stage 2 invest board for Money Moves. Compiled to public/ui/stage2-invest.json. -->
+<!-- Midday rush for Boss for a Day. Compiled to public/ui/stage2-invest.json. -->
 <style>
-  .panel { display: flex; flex-direction: column; align-items: center; padding: 5; width: 134; background-color: #f3e9d2; border-width: 1.5; border-color: #1F3A5F; border-radius: 5; }
-  .beat { display: flex; flex-direction: column; align-items: center; width: 124; }
+  .panel { display: flex; flex-direction: column; align-items: center; padding: 5; width: 120; background-color: #f3e9d2; border-width: 1.5; border-color: #1F3A5F; border-radius: 5; }
+  .beat { display: flex; flex-direction: column; align-items: center; width: 110; }
   .eyebrow { font-size: 3; font-weight: bold; color: #8a6118; text-align: center; letter-spacing: 2; }
-  .intro { font-size: 4; font-weight: bold; color: #1F3A5F; text-align: center; margin-top: 2; }
-  .plans { display: flex; flex-direction: column; align-items: center; width: 124; margin-top: 3; }
-  .plan { display: flex; flex-direction: column; align-items: center; width: 124; padding: 3.5; margin-top: 2; background-color: #fbf4e3; border-width: 1.3; border-color: #1F3A5F; border-radius: 3; cursor: pointer; }
-  .plan-name { font-size: 4; font-weight: bold; color: #1F3A5F; text-align: center; }
-  .plan-split { font-size: 3.2; color: #4a4a4a; text-align: center; margin-top: 1; }
-  .result-line { font-size: 3.6; color: #1F3A5F; text-align: center; margin-top: 2; }
-  .takeaway { font-size: 3.6; font-weight: bold; color: #2e6b2e; text-align: center; margin-top: 3; }
+  .q-text { font-size: 4.4; font-weight: bold; color: #1F3A5F; text-align: center; margin-top: 2; }
+  .answers { display: flex; flex-direction: column; align-items: center; width: 110; margin-top: 3; }
+  .answer { display: flex; align-items: center; width: 110; padding-top: 3; padding-bottom: 3; padding-left: 4; padding-right: 4; margin-top: 1.5; background-color: #fbf4e3; border-width: 1.2; border-color: #1F3A5F; border-radius: 3; cursor: pointer; }
+  .answer-label { font-size: 3.4; color: #1F3A5F; }
+  .ready-text { font-size: 4; color: #1F3A5F; text-align: center; margin-top: 2; }
+  .meter-change { display: none; font-size: 3.2; font-weight: bold; text-align: center; margin-top: 1; }
   .continue-button { display: flex; align-items: center; justify-content: center; margin-top: 4; padding-top: 3; padding-bottom: 3; padding-left: 9; padding-right: 9; background-color: #c8962a; border-radius: 4; cursor: pointer; }
   .continue-label { font-size: 4.4; font-weight: bold; color: #1F3A5F; word-break: keep-all; }
 </style>
 
-<div class="panel">
-  <div id="beat-plan" class="beat">
-    <span class="eyebrow">INVEST YOUR PAYCHECK</span>
-    <span class="intro">You earned a $100 paycheck! How much do you want to invest? Investing might grow your money, but it is not a sure thing.</span>
-    <div class="plans">
-      <div id="card-safe" class="plan">
-        <span class="plan-name">Play It Safe</span>
-        <span class="plan-split">Invest $0. Save $100.</span>
-      </div>
-      <div id="card-some" class="plan">
-        <span class="plan-name">Invest Some</span>
-        <span class="plan-split">Invest $40. Save $60.</span>
-      </div>
-      <div id="card-lots" class="plan">
-        <span class="plan-name">Invest a Lot</span>
-        <span class="plan-split">Invest $80. Save $20.</span>
-      </div>
+<div id="game-panel" class="panel">
+  <div id="beat-rival" class="beat">
+    <span class="eyebrow">A RIVAL'S DEAL</span>
+    <span id="rival-q" class="q-text">A bakery down Cary Street just started a buy-one-get-one sale. What is your move?</span>
+    <div class="answers">
+      <div id="rival-hold" class="answer"><span id="rival-hold-label" class="answer-label">Hold steady, and add a small thank-you treat for regulars.</span></div>
+      <div id="rival-match" class="answer"><span id="rival-match-label" class="answer-label">Slash your prices to beat their deal.</span></div>
+      <div id="rival-ignore" class="answer"><span id="rival-ignore-label" class="answer-label">Ignore it. Their deal is not your problem.</span></div>
     </div>
   </div>
 
-  <div id="beat-outcome" class="beat">
-    <span class="eyebrow">HOW IT WENT</span>
-    <span id="result-invest" class="result-line">...</span>
-    <span id="result-save" class="result-line">...</span>
-    <span id="result-takeaway" class="takeaway">...</span>
-    <div id="continue-button" class="continue-button">
-      <span class="continue-label">Continue</span>
+  <div id="beat-complaint" class="beat">
+    <span class="eyebrow">A COMPLAINT</span>
+    <span id="comp-q" class="q-text">A customer says the loaf they bought came out burnt. How do you handle it?</span>
+    <div class="answers">
+      <div id="comp-free" class="answer"><span id="comp-free-label" class="answer-label">Say sorry and swap it for a fresh one, no charge.</span></div>
+      <div id="comp-discount" class="answer"><span id="comp-discount-label" class="answer-label">Offer a small discount on their next visit.</span></div>
+      <div id="comp-firm" class="answer"><span id="comp-firm-label" class="answer-label">Tell them all sales are final.</span></div>
     </div>
+  </div>
+
+  <div id="beat-done" class="beat">
+    <span class="eyebrow">RUSH HANDLED</span>
+    <span id="done-text" class="ready-text">...</span>
+    <span id="change-sat" class="meter-change"></span>
+    <span id="change-profit" class="meter-change"></span>
+    <span id="change-instinct" class="meter-change"></span>
+    <div id="continue-button" class="continue-button"><span class="continue-label">Into the Afternoon</span></div>
   </div>
 </div>

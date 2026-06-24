@@ -8,30 +8,32 @@
   .answer { display: flex; align-items: center; width: 110; padding-top: 3; padding-bottom: 3; padding-left: 4; padding-right: 4; margin-top: 1.5; background-color: #fbf4e3; border-width: 1.2; border-color: #1F3A5F; border-radius: 3; cursor: pointer; }
   .answer-label { font-size: 3.4; color: #1F3A5F; }
   .reply-text { font-size: 4; color: #1F3A5F; text-align: center; margin-top: 2; }
+  .meter-change { font-size: 3.4; font-weight: bold; color: #2e7d32; text-align: center; margin-top: 1.5; }
   .got-it-button { display: flex; align-items: center; justify-content: center; margin-top: 4; padding-top: 3; padding-bottom: 3; padding-left: 9; padding-right: 9; background-color: #c8962a; border-radius: 4; cursor: pointer; }
   .got-it-label { font-size: 4.4; font-weight: bold; color: #1F3A5F; word-break: keep-all; }
 </style>
 
-<div class="panel">
+<div id="game-panel" class="panel">
   <div id="beat-q" class="beat">
-    <span class="eyebrow">GUS ASKS</span>
-    <span class="q-text">You got your first paycheck, nice work! Investing can grow your money, but it can also lose some. What is the smart way to invest?</span>
+    <span id="eyebrow-asks" class="eyebrow">MS. DELIA ASKS</span>
+    <span id="q-text" class="q-text">A customer wants two dozen cupcakes boxed up in twenty minutes, right in the middle of the lunch rush. What do you do?</span>
     <div class="answers">
       <div id="answer-a" class="answer">
-        <span class="answer-label">Invest some money, but keep some safe too.</span>
+        <span id="answer-a-label" class="answer-label">Take it, but be honest. Tell them it will be ready a little later so the rush stays smooth.</span>
       </div>
       <div id="answer-b" class="answer">
-        <span class="answer-label">Invest every dollar to get rich fast!</span>
+        <span id="answer-b-label" class="answer-label">Say yes and drop everything to rush it right now.</span>
       </div>
       <div id="answer-c" class="answer">
-        <span class="answer-label">Never invest. It is too scary.</span>
+        <span id="answer-c-label" class="answer-label">Turn it down. You are too busy to bother.</span>
       </div>
     </div>
   </div>
 
   <div id="beat-reply" class="beat">
-    <span class="eyebrow">GUS SAYS</span>
+    <span id="eyebrow-says" class="eyebrow">MS. DELIA SAYS</span>
     <span id="reply-text" class="reply-text">...</span>
+    <span id="meter-change" class="meter-change"></span>
     <div id="got-it-button" class="got-it-button">
       <span class="got-it-label">Got It</span>
     </div>

@@ -1,9 +1,10 @@
 // ============================================================================
-// environment.ts  —  Main Street for Money Moves
+// environment.ts  —  the shop interior for Boss for a Day
 // Built from simple shapes in the Market Harvest style: a few mesh helpers, a
-// gradient sky, soft daylight, and a stage-look retint so the street's time of
-// day shifts as the student grows up. Buildings are landmarks the student
-// walks to. No 3D model files are needed; real models can be swapped in later.
+// gradient sky, soft daylight, and a stage-look retint so the light shifts from
+// morning toward golden as the day advances. The player stands inside a shop:
+// a wood floor, three walls, and a glass storefront looking out onto the street.
+// No 3D model files are needed; real models can be swapped in later.
 // ============================================================================
 
 import {
@@ -19,6 +20,7 @@ import {
   Color,
   CanvasTexture,
   SRGBColorSpace,
+  RepeatWrapping,
   DirectionalLight,
   HemisphereLight,
   Fog,
@@ -26,6 +28,7 @@ import {
   DoubleSide,
   Vector3,
 } from "@iwsdk/core";
+import { ShopId, SHOPS } from "./shops";
 
 // ----------------------------------------------------------------------------
 // PALETTE  —  the WORLD colors (warm and naturalistic). The cream/navy/gold of
@@ -55,7 +58,71 @@ export const PALETTE = {
   horizon: "#dceefb",
   sun: "#fff2d4",
   piggy: "#f59ab6",
+  shopFloor: "#b98a52",
+  shopWall: "#efe2c6",
+  shopTrim: "#8b5e3c",
+  // Warm bakery reskin: cream-and-rose palette, warm wood trim, checker floor.
+  wallCream: "#f6e8cb",
+  wainscot: "#e3a9a2",
+  floorLight: "#efe0bf",
+  floorDark: "#cf9a63",
+  woodWarm: "#a9763f",
+  woodDark2: "#7a4f2a",
+  caseGlass: "#dff0f4",
+  accentRose: "#d98a8f",
+  // Bakery treats: crusts, frostings, and fillings for the case and shelf.
+  breadCrust: "#c98a3e",
+  breadDark: "#a5662a",
+  frostPink: "#f3b6c4",
+  frostCream: "#f7ecd0",
+  cherryRed: "#c2402f",
+  chocolate: "#5b3a24",
+  glass: "#bcd8ec",
+  counterTop: "#6b4a2e",
+  register: "#3a4654",
+  productA: "#d2452f",
+  productB: "#e7b84a",
+  productC: "#3a7bd5",
+  teal: "#0E7C7B",
+  // Ms. Delia, the baker: dress, apron, skin, hair, hat, and a touch of cheek.
+  dressBlue: "#6f86a6",
+  apronCream: "#f5ecd6",
+  skinTone: "#e6b48f",
+  hairBrown: "#5b3a24",
+  hatWhite: "#f7f3ea",
+  cheekPink: "#e8a0a0",
+  // Surf shop reskin: sandy checker floor, ocean-blue walls, and Mr. Reyes.
+  surfSand1: "#e6d2a6",
+  surfSand2: "#cdb27e",
+  surfWall: "#86c1da",
+  surfWainscot: "#3f8aa6",
+  boardRed: "#d2452f",
+  boardYellow: "#e7b84a",
+  boardTeal: "#27a3a3",
+  reyesShirt: "#1f8fb0",
+  reyesShorts: "#3a5f8a",
+  reyesSkin: "#c8895a",
+  reyesHair: "#3a2a20",
+  reyesCap: "#16465c",
+  // Repair shop reskin: cool gray checker floor, slate-blue walls, and Mr. Okafor.
+  repairFloor1: "#cdd3d8",
+  repairFloor2: "#a7b0b8",
+  repairWall: "#bcc7cf",
+  repairWainscot: "#46708c",
+  okaforSkirt: "#46505a",
+  okaforSmock: "#2f7d8a",
+  okaforApron: "#e3e9ec",
+  okaforSkin: "#7a4f33",
+  okaforHair: "#1f1a18",
 };
+
+// Held so a per-shop reskin can repaint them after the shell is built: the floor
+// checker texture and the solid wall / wainscot colors. Captured as the shell
+// builds; left untouched for the bakery, recolored for surf.
+let _floorMat: MeshLambertMaterial | null = null;
+let _wallMats: MeshLambertMaterial[] = [];
+let _wainscotMats: MeshLambertMaterial[] = [];
+
 const SIGN_CREAM = "#f3e9d2"; // sign background (matches the panel cream)
 const SIGN_NAVY = "#1F3A5F";  // sign text (matches the panel navy)
 
@@ -79,20 +146,23 @@ function registerFoliage(mesh: Mesh) {
 }
 
 const STAGE_LOOKS = {
-  // Stage 1, childhood: a fresh bright morning.
-  stage1: { skyTop: "#5aa6e0", skyMid: "#9fcdee", horizon: "#e3f1fb", sun: "#fff4dd", sunI: 2.3, hemiI: 1.15, ground: "#ffffff", foliage: "#ffffff" },
-  // Stage 2, working years: a strong full midday.
-  stage2: { skyTop: "#2f86d8", skyMid: "#7fbcec", horizon: "#d6ebfb", sun: "#ffefbe", sunI: 2.7, hemiI: 1.2, ground: "#f3ffe4", foliage: "#eaffce" },
-  // Stage 3, adult: a warm golden hour.
-  stage3: { skyTop: "#6f7fb8", skyMid: "#d9a878", horizon: "#f6cf9a", sun: "#ffba78", sunI: 2.0, hemiI: 0.98, ground: "#f0e0b8", foliage: "#e8b878" },
+  // Setup lobby: a calm neutral backdrop for the shop picker, before any shop.
+  lobby: { skyTop: "#7e93a3", skyMid: "#a9bcc7", horizon: "#d4dee4", sun: "#fdf6ea", sunI: 1.7, hemiI: 1.05, ground: "#d4dee4", foliage: "#d4dee4" },
+  // Morning (childhood): a fresh bright morning.
+  morning: { skyTop: "#5aa6e0", skyMid: "#9fcdee", horizon: "#e3f1fb", sun: "#fff4dd", sunI: 2.3, hemiI: 1.15, ground: "#ffffff", foliage: "#ffffff" },
+  // Midday (working years): a strong full midday.
+  midday: { skyTop: "#2f86d8", skyMid: "#7fbcec", horizon: "#d6ebfb", sun: "#ffefbe", sunI: 2.7, hemiI: 1.2, ground: "#f3ffe4", foliage: "#eaffce" },
+  // Afternoon (adult): a warm golden hour.
+  afternoon: { skyTop: "#6f7fb8", skyMid: "#d9a878", horizon: "#f6cf9a", sun: "#ffba78", sunI: 2.0, hemiI: 0.98, ground: "#f0e0b8", foliage: "#e8b878" },
 };
 
 // Retint the whole street for a stage. Safe to call any number of times; every
-// tint is computed from stored originals, never stacked. "setup" uses stage1.
+// tint is computed from stored originals, never stacked. "select" maps to morning, "close" to afternoon.
 export function setStageLook(world: any, stage: string) {
   void world;
   let key = stage;
-  if (key === "setup" || key === "report") key = key === "report" ? "stage3" : "stage1";
+  if (key === "select") key = "lobby";
+  if (key === "close") key = "afternoon";
   const preset = (STAGE_LOOKS as any)[key];
   if (!preset) return;
   if (stageState.skyMat) {
@@ -155,6 +225,30 @@ function makeSkyTexture(top: string, mid: string, horizon: string): CanvasTextur
   ctx.fillRect(0, 0, 16, 256);
   const tex = new CanvasTexture(c);
   tex.colorSpace = SRGBColorSpace;
+  return tex;
+}
+
+// A small 2x2 checkerboard, drawn once and tiled across the bakery floor. The
+// two colors alternate; the texture repeats so the squares read at a tile size
+// that fits the room (about 6 across, 9 down the 11x16 floor).
+function makeCheckerTexture(a: string, b: string): CanvasTexture {
+  const S = 64;
+  const half = S / 2;
+  const c = document.createElement("canvas");
+  c.width = S;
+  c.height = S;
+  const ctx = c.getContext("2d") as CanvasRenderingContext2D;
+  ctx.fillStyle = a;
+  ctx.fillRect(0, 0, half, half);
+  ctx.fillRect(half, half, half, half);
+  ctx.fillStyle = b;
+  ctx.fillRect(half, 0, half, half);
+  ctx.fillRect(0, half, half, half);
+  const tex = new CanvasTexture(c);
+  tex.colorSpace = SRGBColorSpace;
+  tex.wrapS = RepeatWrapping;
+  tex.wrapT = RepeatWrapping;
+  tex.repeat.set(6, 9);
   return tex;
 }
 
@@ -233,303 +327,144 @@ function buildSkyAndLights(world: any) {
 }
 
 // ----------------------------------------------------------------------------
-// THE STREET  —  grass ground (the walkable floor), a road, and two sidewalks.
-// Returns the grass ground entity so index.ts can mark it walkable.
+// THE SHOP FLOOR  —  the walkable wood floor. Returned to index.ts so it is
+// registered as the LocomotionEnvironment the player stands on. It keeps its
+// wood color and is lit by the day-shifting sun, warming as the day advances.
 // ----------------------------------------------------------------------------
-function buildStreet(world: any) {
-  // Grass ground (the walkable floor). Returned to index.ts. Sized to the
-  // bounded plaza (the hedge ring in buildBoundary fences the player in), with
-  // its edges tucked a little past the hedges so you never see or reach them.
-  // Offset back so the plaza is centered on the shops, not on the empty apron.
-  const grassMat = new MeshLambertMaterial({ color: new Color(PALETTE.grass) });
-  const grassMesh = new Mesh(new PlaneGeometry(32, 28), grassMat);
-  grassMesh.receiveShadow = true;
-  const ground = world.createTransformEntity(grassMesh);
+function buildShopFloor(world: any) {
+  const floorMesh = new Mesh(
+    new PlaneGeometry(11, 16),
+    new MeshLambertMaterial({ map: makeCheckerTexture(PALETTE.floorLight, PALETTE.floorDark) }),
+  );
+  floorMesh.receiveShadow = true;
+  const ground = world.createTransformEntity(floorMesh);
   ground.object3D!.rotation.x = -Math.PI / 2;
-  ground.object3D!.position.set(0, 0, -1.5);
-  stageState.groundMats.push(grassMat);
-
-  // The street runs LEFT TO RIGHT (along X) in front of the shops, so the road
-  // and sidewalks are long, thin strips that cross your view. Kept inside the
-  // side hedges (x = +/-13.5) so they do not poke through the boundary.
-  const roadMesh = new Mesh(new PlaneGeometry(26, 5), new MeshLambertMaterial({ color: new Color(PALETTE.road) }));
-  const roadE = world.createTransformEntity(roadMesh);
-  roadE.object3D!.rotation.x = -Math.PI / 2;
-  roadE.object3D!.position.set(0, 0.02, -5.0);
-
-  const frontWalk = new Mesh(new PlaneGeometry(26, 2.2), new MeshLambertMaterial({ color: new Color(PALETTE.sidewalk) }));
-  const fwE = world.createTransformEntity(frontWalk);
-  fwE.object3D!.rotation.x = -Math.PI / 2;
-  fwE.object3D!.position.set(0, 0.025, -6.9);
-
-  const nearWalk = new Mesh(new PlaneGeometry(26, 1.6), new MeshLambertMaterial({ color: new Color(PALETTE.sidewalk) }));
-  const nwE = world.createTransformEntity(nearWalk);
-  nwE.object3D!.rotation.x = -Math.PI / 2;
-  nwE.object3D!.position.set(0, 0.025, -2.8);
-
-  // A "Main Street" banner across the middle, facing you.
-  const banner = new Group();
-  for (const sx of [-6, 6]) {
-    const post = meshCyl(0.16, 0.18, 4.3, PALETTE.woodDark, 10);
-    post.position.set(sx, 2.15, 0);
-    banner.add(post);
-  }
-  const beam = meshBox(12.4, 0.35, 0.35, PALETTE.wood);
-  beam.position.set(0, 4.15, 0);
-  banner.add(beam);
-  const board = new Mesh(new PlaneGeometry(4.2, 0.95), new MeshBasicMaterial({ map: makeSignTexture("Main Street"), side: DoubleSide }));
-  // Sit clearly IN FRONT of the beam (front face at z +0.175); otherwise the
-  // beam covers the centered text and the board reads as blank.
-  board.position.set(0, 4.15, 0.3);
-  banner.add(board);
-  const bannerE = world.createTransformEntity(banner);
-  bannerE.object3D!.position.set(0, 0, -8.0);
-
+  ground.object3D!.position.set(0, 0, 0);
+  _floorMat = floorMesh.material as MeshLambertMaterial;
   return ground;
 }
 
 // ----------------------------------------------------------------------------
-// THE FOUR BUILDINGS  —  each is a Group of shapes, then one world object.
-// Built facing +Z (the street side); placed and rotated by buildEnvironment.
+// SHOP WALLS  —  three solid walls and a glass storefront, in ONE Group. This
+// is the collision boundary: index.ts registers it as a LocomotionEnvironment,
+// so the capsule bumps the walls and cannot leave the shop. The glass pane is
+// see-through (low opacity) but still part of this Group, so it collides too and
+// the player cannot walk out the front. The player spawns near the back wall,
+// facing -z, looking down the shop toward the street through the glass.
 // ----------------------------------------------------------------------------
-function buildHome(world: any, x: number, z: number, rotY: number) {
+export const BOUNDARY = { xHalf: 5.5, zBack: 8, zFront: -8, height: 3, thickness: 0.3 };
+
+function buildShopWalls(world: any) {
   const g = new Group();
-  const foundation = meshBox(4.2, 0.25, 3.2, "#9a948a");
-  foundation.position.set(0, 0.125, 0);
-  g.add(foundation);
-  const walls = meshBox(4, 2.2, 3, PALETTE.homeWall);
-  walls.position.set(0, 0.25 + 1.1, 0);
-  g.add(walls);
-  // Gabled roof: a 3-sided prism, scaled to overhang.
-  const roofGeo = new CylinderGeometry(1, 1, 4.6, 3, 1);
-  roofGeo.rotateZ(Math.PI / 2);
-  const roof = new Mesh(roofGeo, new MeshLambertMaterial({ color: new Color(PALETTE.homeRoof) }));
-  roof.castShadow = true;
-  roof.scale.set(1, 0.7, (3 + 0.8) / Math.sqrt(3));
-  roof.position.set(0, 0.25 + 2.2 + 0.5 * 0.7, 0);
-  g.add(roof);
-  const door = meshBox(0.7, 1.3, 0.08, PALETTE.woodDark);
-  door.position.set(-0.9, 0.25 + 0.65, 1.52);
-  g.add(door);
-  const win = meshBox(0.7, 0.7, 0.06, "#bcd8ec");
-  win.position.set(0.9, 0.25 + 1.3, 1.52);
-  g.add(win);
-  const chim = meshBox(0.4, 1.2, 0.4, "#9c4a32");
-  chim.position.set(1.3, 0.25 + 2.2 + 0.4, 0);
-  g.add(chim);
-  addBoardSign(g, "Home", 0, 0.25 + 2.0, 1.55);
-  buildPiggyBank(g, 1.6, 2.2);
-  const e = world.createTransformEntity(g);
-  e.object3D!.position.set(x, 0, z);
-  e.object3D!.rotation.y = rotY;
-}
 
-// A cute piggy bank on a little stand, sat in front of the home.
-function buildPiggyBank(group: Group, x: number, z: number) {
-  const stand = meshBox(0.8, 0.5, 0.8, PALETTE.wood);
-  stand.position.set(x, 0.25, z);
-  group.add(stand);
-  const body = meshSphere(0.35, PALETTE.piggy, 14);
-  body.scale.set(1.3, 1, 1);
-  body.position.set(x, 0.86, z);
-  group.add(body);
-  const snout = meshCyl(0.12, 0.12, 0.1, "#e87fa0", 10);
-  snout.rotation.x = Math.PI / 2;
-  snout.position.set(x + 0.46, 0.86, z);
-  group.add(snout);
-  for (const sz of [-1, 1]) {
-    const ear = meshCone(0.1, 0.16, PALETTE.piggy, 8);
-    ear.position.set(x + 0.22, 1.16, z + sz * 0.18);
-    group.add(ear);
-  }
-  for (const dx of [-0.2, 0.2]) {
-    for (const dz of [-0.18, 0.18]) {
-      const leg = meshCyl(0.07, 0.07, 0.25, "#e87fa0", 8);
-      leg.position.set(x + dx, 0.62, z + dz);
-      group.add(leg);
-    }
-  }
-  const slot = meshBox(0.2, 0.04, 0.06, PALETTE.woodDark);
-  slot.position.set(x, 1.19, z);
-  group.add(slot);
-}
+  // Back wall (behind you at spawn).
+  const back = meshBox(11, 3, 0.3, PALETTE.wallCream);
+  back.position.set(0, 1.5, 8);
+  g.add(back);
 
-function buildBank(world: any, x: number, z: number, rotY: number) {
-  const g = new Group();
-  const base = meshBox(5, 0.3, 3.6, PALETTE.bankTrim);
-  base.position.set(0, 0.15, 0);
-  g.add(base);
-  const walls = meshBox(4.6, 2.8, 3.2, PALETTE.bankWall);
-  walls.position.set(0, 0.3 + 1.4, 0);
-  g.add(walls);
-  const roof = meshBox(5, 0.4, 3.6, PALETTE.bankRoof);
-  roof.position.set(0, 0.3 + 2.8 + 0.2, 0);
-  g.add(roof);
-  for (const cx of [-1.7, -0.57, 0.57, 1.7]) {
-    const col = meshCyl(0.22, 0.22, 2.8, "#efe9da", 12);
-    col.position.set(cx, 0.3 + 1.4, 1.7);
-    g.add(col);
-  }
-  const steps = meshBox(3.6, 0.2, 0.8, PALETTE.bankTrim);
-  steps.position.set(0, 0.1, 2.0);
-  g.add(steps);
-  const door = meshBox(0.9, 1.6, 0.08, PALETTE.woodDark);
-  door.position.set(0, 0.3 + 0.8, 1.62);
-  g.add(door);
-  addBoardSign(g, "Bank", 0, 0.3 + 2.55, 1.62);
-  const e = world.createTransformEntity(g);
-  e.object3D!.position.set(x, 0, z);
-  e.object3D!.rotation.y = rotY;
-}
+  // Left and right walls, running the full depth.
+  const left = meshBox(0.3, 3, 16, PALETTE.wallCream);
+  left.position.set(-5.5, 1.5, 0);
+  g.add(left);
+  const right = meshBox(0.3, 3, 16, PALETTE.wallCream);
+  right.position.set(5.5, 1.5, 0);
+  g.add(right);
 
-function buildStore(world: any, x: number, z: number, rotY: number) {
-  const g = new Group();
-  const foundation = meshBox(4.4, 0.25, 3.2, "#9a948a");
-  foundation.position.set(0, 0.125, 0);
-  g.add(foundation);
-  const walls = meshBox(4.2, 2.4, 3, PALETTE.storeWall);
-  walls.position.set(0, 0.25 + 1.2, 0);
-  g.add(walls);
-  const roof = meshBox(4.4, 0.35, 3.2, PALETTE.storeRoof);
-  roof.position.set(0, 0.25 + 2.4 + 0.18, 0);
-  g.add(roof);
-  const win = meshBox(2.2, 1.2, 0.06, "#bcd8ec");
-  win.position.set(0, 0.25 + 1.1, 1.52);
-  g.add(win);
-  const door = meshBox(0.8, 1.4, 0.08, PALETTE.woodDark);
-  door.position.set(1.4, 0.25 + 0.7, 1.52);
-  g.add(door);
-  // Striped awning over the window: a slanted row of thin boxes.
-  const awn = new Group();
-  let i = 0;
-  for (const ax of [-1.0, -0.5, 0, 0.5, 1.0]) {
-    const stripe = meshBox(0.5, 0.08, 0.9, i % 2 === 0 ? PALETTE.awningA : PALETTE.awningB);
-    stripe.position.set(ax, 0, 0);
-    awn.add(stripe);
-    i = i + 1;
-  }
-  awn.position.set(0, 0.25 + 1.85, 1.9);
-  awn.rotation.x = -0.5;
-  g.add(awn);
-  addBoardSign(g, "Corner Store", 0, 0.25 + 2.2, 1.55);
-  const e = world.createTransformEntity(g);
-  e.object3D!.position.set(x, 0, z);
-  e.object3D!.rotation.y = rotY;
-}
+  // Wainscoting: a rose band along the bottom of the three solid walls, on the
+  // room-side face of each (just inside the wall), giving the bakery a warm dado.
+  const backBand = meshBox(11, 1.0, 0.1, PALETTE.wainscot);
+  backBand.position.set(0, 0.5, 7.85);
+  g.add(backBand);
+  const leftBand = meshBox(0.1, 1.0, 16, PALETTE.wainscot);
+  leftBand.position.set(-5.35, 0.5, 0);
+  g.add(leftBand);
+  const rightBand = meshBox(0.1, 1.0, 16, PALETTE.wainscot);
+  rightBand.position.set(5.35, 0.5, 0);
+  g.add(rightBand);
 
-function buildBusinessLot(world: any, x: number, z: number, rotY: number) {
-  const g = new Group();
-  const dirt = new Mesh(new PlaneGeometry(4.4, 3.4), new MeshLambertMaterial({ color: new Color("#caa877") }));
-  dirt.rotation.x = -Math.PI / 2;
-  dirt.position.set(0, 0.03, 0);
-  g.add(dirt);
-  for (const fx of [-2, -1, 0, 1, 2]) {
-    const post = meshCyl(0.07, 0.07, 0.7, PALETTE.woodDark, 8);
-    post.position.set(fx, 0.35, -1.6);
-    g.add(post);
-  }
-  const rail = meshBox(4.2, 0.08, 0.08, PALETTE.wood);
-  rail.position.set(0, 0.55, -1.6);
-  g.add(rail);
-  const post = meshCyl(0.08, 0.08, 2.2, PALETTE.woodDark, 8);
-  post.position.set(0, 1.1, 0);
-  g.add(post);
-  addBoardSign(g, "Your Spot", 0, 1.9, 0.1);
-  const small = new Mesh(new PlaneGeometry(1.4, 0.32), new MeshBasicMaterial({ map: makeSignTexture("Coming Soon"), side: DoubleSide }));
-  small.position.set(0, 1.5, 0.1);
-  g.add(small);
-  const e = world.createTransformEntity(g);
-  e.object3D!.position.set(x, 0, z);
-  e.object3D!.rotation.y = rotY;
-}
+  // Glass storefront across the front (z = -8): a solid trim sill below, a
+  // see-through pane in the middle, and a trim header above. The wood parts warm
+  // to honey; the pane stays transparent (tinted to the cooler case glass).
+  const sill = meshBox(11, 0.6, 0.3, PALETTE.woodWarm);
+  sill.position.set(0, 0.3, -8);
+  g.add(sill);
+  const glass = new Mesh(
+    new BoxGeometry(10.4, 2.0, 0.1),
+    new MeshLambertMaterial({ color: new Color(PALETTE.caseGlass), transparent: true, opacity: 0.18 }),
+  );
+  glass.position.set(0, 1.6, -8);
+  g.add(glass);
+  const header = meshBox(11, 0.4, 0.3, PALETTE.woodWarm);
+  header.position.set(0, 2.8, -8);
+  g.add(header);
 
-// ----------------------------------------------------------------------------
-// DECORATION  —  a few trees and street lamps to make the street feel alive.
-// ----------------------------------------------------------------------------
-function buildTrees(world: any) {
-  // Lined up the two sides of the plaza (none behind the shops, where the back
-  // hedge now sits), framing the walk from the entrance down to the stores.
-  const spots = [[-12, 7], [12, 7], [-12, -1], [12, -1], [-12, -9], [12, -9]];
-  for (const s of spots) {
-    const g = new Group();
-    const trunk = meshCyl(0.18, 0.24, 1.4, PALETTE.trunk, 8);
-    trunk.position.set(0, 0.7, 0);
-    g.add(trunk);
-    const f1 = meshSphere(0.9, PALETTE.leaf, 12);
-    f1.position.set(0, 1.7, 0);
-    registerFoliage(f1);
-    g.add(f1);
-    const f2 = meshSphere(0.7, PALETTE.leaf, 12);
-    f2.position.set(0.4, 1.4, 0.2);
-    registerFoliage(f2);
-    g.add(f2);
-    const e = world.createTransformEntity(g);
-    e.object3D!.position.set(s[0], 0, s[1]);
-  }
-}
-
-function buildLamps(world: any) {
-  const spots = [[-11, -6.9], [-5.5, -6.9], [0, -6.9], [5.5, -6.9], [11, -6.9]];
-  for (const s of spots) {
-    const g = new Group();
-    const pole = meshCyl(0.08, 0.1, 3, PALETTE.woodDark, 8);
-    pole.position.set(0, 1.5, 0);
-    g.add(pole);
-    const head = meshSphere(0.18, PALETTE.lamp, 10);
-    head.position.set(0, 3.05, 0);
-    g.add(head);
-    const e = world.createTransformEntity(g);
-    e.object3D!.position.set(s[0], 0, s[1]);
-  }
-}
-
-// ----------------------------------------------------------------------------
-// BOUNDARY  —  a hedge ring around the plaza. This is the ONE thing that keeps
-// the player on the ground: index.ts registers it as a LocomotionEnvironment, so
-// the locomotion capsule collides with it and cannot walk off the edge (which is
-// what made you fall). The hedges are tall enough (1.8 m) to block the capsule
-// and sit just inside the grass so its edges stay hidden behind them.
-// ----------------------------------------------------------------------------
-export const BOUNDARY = {
-  xHalf: 13.5, // left/right hedges sit here
-  zBack: -12.5, // just behind the shops
-  zFront: 9.5, // a little behind where you start
-  height: 1.8,
-  thickness: 0.6,
-};
-
-function buildBoundary(world: any) {
-  const g = new Group();
-  const H = BOUNDARY.height;
-  const T = BOUNDARY.thickness;
-  const x = BOUNDARY.xHalf;
-  const zMid = (BOUNDARY.zFront + BOUNDARY.zBack) / 2;
-  const spanX = x * 2 + T; // overhang the corners so there are no gaps
-  const spanZ = BOUNDARY.zFront - BOUNDARY.zBack + T;
-
-  function hedge(w: number, d: number, cx: number, cz: number) {
-    const m = meshBox(w, H, d, PALETTE.hedge);
-    m.position.set(cx, H / 2, cz);
-    g.add(m);
-  }
-  hedge(spanX, T, 0, BOUNDARY.zBack); // back, behind the shops
-  hedge(spanX, T, 0, BOUNDARY.zFront); // front, behind the start
-  hedge(T, spanZ, -x, zMid); // left
-  hedge(T, spanZ, x, zMid); // right
+  _wallMats = [back.material as MeshLambertMaterial, left.material as MeshLambertMaterial, right.material as MeshLambertMaterial];
+  _wainscotMats = [backBand.material as MeshLambertMaterial, leftBand.material as MeshLambertMaterial, rightBand.material as MeshLambertMaterial];
 
   return world.createTransformEntity(g);
 }
 
 // ----------------------------------------------------------------------------
-// STATION ANCHORS  —  where each building sits and which way it faces. Later
-// prompts (the mentor, the panels) read these so they know where the player
-// walks. This is the ONE place to nudge building positions.
+// STOREFRONT SIGN  —  "Sweet Capital Bakery" mounted just inside the glass
+// storefront (the front wall sits at z = -8). It hangs high near the top of the
+// window and faces into the room (+z), so the player reads it walking in. A thin
+// wood frame backs the printed board.
+// ----------------------------------------------------------------------------
+function buildStorefrontSign(world: any, name: string) {
+  const g = new Group();
+
+  // Thin wood frame, just behind the board.
+  const frame = meshBox(4.2, 1.1, 0.06, PALETTE.woodWarm);
+  frame.position.set(0, 0, -0.02);
+  g.add(frame);
+
+  // The printed sign, facing the room.
+  const board = new Mesh(
+    new PlaneGeometry(4, 0.9),
+    new MeshBasicMaterial({ map: makeSignTexture(name), side: DoubleSide }),
+  );
+  board.position.set(0, 0, 0.02);
+  g.add(board);
+
+  const e = world.createTransformEntity(g);
+  // A little in front of the storefront wall (z = -8), high near the window top.
+  e.object3D!.position.set(0, 2.25, -7.7);
+}
+
+// ----------------------------------------------------------------------------
+// STREET VIEW  —  what shows through the glass: a sidewalk, a road, and one
+// building across the way for depth. Placed beyond the storefront (more negative
+// z). The sky sphere and sun sit behind all of it and shift with the day.
+// ----------------------------------------------------------------------------
+function buildStreetView(world: any) {
+  const sidewalk = new Mesh(new PlaneGeometry(12, 2.5), new MeshLambertMaterial({ color: new Color(PALETTE.sidewalk) }));
+  const swE = world.createTransformEntity(sidewalk);
+  swE.object3D!.rotation.x = -Math.PI / 2;
+  swE.object3D!.position.set(0, 0.02, -9.6);
+
+  const road = new Mesh(new PlaneGeometry(12, 5), new MeshLambertMaterial({ color: new Color(PALETTE.road) }));
+  const roadE = world.createTransformEntity(road);
+  roadE.object3D!.rotation.x = -Math.PI / 2;
+  roadE.object3D!.position.set(0, 0.0, -12.5);
+
+  const building = meshBox(6, 4, 4, PALETTE.bankWall);
+  const buildingE = world.createTransformEntity(building);
+  buildingE.object3D!.position.set(0, 2, -16);
+
+  // Hand back the street pieces so the opening can hide them until a shop is chosen.
+  return [swE, roadE, buildingE];
+}
+
+// ----------------------------------------------------------------------------
+// STATION ANCHORS  —  where each panel/mentor sits inside the shop. The panels
+// read these, so they move into the shop on their own. The names bank/business
+// are leftover labels we rename when we reskin each phase.
 // ----------------------------------------------------------------------------
 export const STATIONS = {
-  home: { x: -9.5, z: -9, faceY: 0 },
-  bank: { x: -3.2, z: -9, faceY: 0 },
-  store: { x: 3.2, z: -9, faceY: 0 },
-  business: { x: 9.5, z: -9, faceY: 0 },
+  bank:     { x: -2.6, z: 0,  faceY: 0 },
+  business: { x:  2.6, z: 0,  faceY: 0 },
+  store:    { x:  0,   z: -3, faceY: 0 },
+  home:     { x:  0,   z:  4, faceY: 0 },
 };
 
 // ============================================================================
@@ -540,7 +475,7 @@ export const STATIONS = {
 // ============================================================================
 
 // Where Gus parks (and which way he faces). The one place to move him.
-export const GUS_SPOT = { x: -8, z: -2.5, faceY: 0 };
+export const GUS_SPOT = { x: -2.6, z: 1.6, faceY: 0 };
 
 // Break a sentence into lines that fit a given width, for the speech bubble.
 function wrapLines(ctx: any, text: string, maxWidth: number): string[] {
@@ -586,11 +521,25 @@ function makeBubbleTexture(text: string): CanvasTexture {
   ctx.fill();
   ctx.strokeRect(bx, by, bw, bh);
   ctx.fillStyle = SIGN_NAVY;
-  ctx.font = "bold 30px sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  const lines = wrapLines(ctx, text, bw - 44);
-  const lh = 38;
+
+  // Fit the text to the box: take the largest font (up to 30px) whose wrapped
+  // lines fit inside the bubble both across and down, then center them. A long
+  // greeting shrinks to stay inside instead of spilling over the border.
+  const maxTextW = bw - 44;
+  const maxTextH = bh - 28;
+  let size = 30;
+  let lines: string[] = [];
+  let lh = 38;
+  for (;;) {
+    ctx.font = "bold " + size + "px sans-serif";
+    lh = size * 1.25;
+    lines = wrapLines(ctx, text, maxTextW);
+    if (size <= 14 || lines.length * lh <= maxTextH) break;
+    size -= 2;
+  }
+
   const startY = by + bh / 2 - ((lines.length - 1) * lh) / 2;
   let li = 0;
   for (const ln of lines) {
@@ -602,81 +551,205 @@ function makeBubbleTexture(text: string): CanvasTexture {
   return tex;
 }
 
+// ---- Ms. Delia, the baker who owns the shop. A blue dress under a cream
+// apron, shoulder-length brown hair, and a tall white baker's hat. She stands
+// at GUS_SPOT facing the room (+z), just behind the sales counter, feet on the
+// floor at y = 0. Built from the same shape helpers as the rest of the shop. ----
+function buildDeliaFigure(): Group {
+  const gus = new Group();
+
+  // Dress: a cone skirt with a cylinder bodice above it.
+  const skirt = meshCone(0.4, 0.9, PALETTE.dressBlue);
+  skirt.position.set(0, 0.45, 0);
+  gus.add(skirt);
+  const bodice = meshCyl(0.2, 0.24, 0.5, PALETTE.dressBlue);
+  bodice.position.set(0, 1.05, 0);
+  gus.add(bodice);
+
+  // Cream apron across the front.
+  const apron = meshBox(0.4, 0.85, 0.05, PALETTE.apronCream);
+  apron.position.set(0, 0.7, 0.34);
+  gus.add(apron);
+
+  // Arms down her sides, each with a hand at the end.
+  for (const s of [-1, 1]) {
+    const arm = meshCyl(0.06, 0.06, 0.45, PALETTE.dressBlue);
+    arm.position.set(s * 0.26, 1.05, 0);
+    gus.add(arm);
+    const hand = meshSphere(0.06, PALETTE.skinTone);
+    hand.position.set(s * 0.26, 0.82, 0);
+    gus.add(hand);
+  }
+
+  // Head, with a rounded mass of hair behind it and a lock down each side.
+  const head = meshSphere(0.19, PALETTE.skinTone);
+  head.position.set(0, 1.52, 0);
+  gus.add(head);
+  const hairBack = meshSphere(0.21, PALETTE.hairBrown);
+  hairBack.position.set(0, 1.52, -0.05);
+  gus.add(hairBack);
+  for (const s of [-1, 1]) {
+    const lock = meshBox(0.09, 0.28, 0.14, PALETTE.hairBrown);
+    lock.position.set(s * 0.17, 1.38, -0.02);
+    gus.add(lock);
+  }
+
+  // White baker's hat: a band with a puffed top.
+  const hatBand = meshCyl(0.16, 0.17, 0.14, PALETTE.hatWhite);
+  hatBand.position.set(0, 1.68, 0);
+  gus.add(hatBand);
+  const hatPuff = meshSphere(0.19, PALETTE.hatWhite);
+  hatPuff.position.set(0, 1.82, 0);
+  gus.add(hatPuff);
+
+  // Face: pink cheeks and dark eyes, set on the +z side so she faces the room.
+  for (const s of [-1, 1]) {
+    const cheek = meshSphere(0.035, PALETTE.cheekPink);
+    cheek.position.set(s * 0.09, 1.49, 0.16);
+    gus.add(cheek);
+    const eye = meshSphere(0.025, "#3a2a20");
+    eye.position.set(s * 0.07, 1.55, 0.17);
+    gus.add(eye);
+  }
+
+  return gus;
+}
+
+// ---- Mr. Reyes, who owns the surf shop. Board shorts and sandals, a tee, short
+// hair under a ball cap, standing at GUS_SPOT facing the room (+z). Built from
+// the same shape helpers so he matches the rest of the shop. ----
+function buildReyesFigure(): Group {
+  const g = new Group();
+
+  // Board shorts: two short legs, with sandals.
+  for (const s of [-1, 1]) {
+    const leg = meshCyl(0.1, 0.1, 0.55, PALETTE.reyesShorts);
+    leg.position.set(s * 0.12, 0.4, 0);
+    g.add(leg);
+    const shoe = meshBox(0.16, 0.08, 0.26, "#3a2a20");
+    shoe.position.set(s * 0.12, 0.07, 0.04);
+    g.add(shoe);
+  }
+
+  // Tee shirt torso.
+  const torso = meshCyl(0.22, 0.24, 0.6, PALETTE.reyesShirt);
+  torso.position.set(0, 1.0, 0);
+  g.add(torso);
+
+  // Arms and hands.
+  for (const s of [-1, 1]) {
+    const arm = meshCyl(0.06, 0.06, 0.45, PALETTE.reyesShirt);
+    arm.position.set(s * 0.27, 1.05, 0);
+    g.add(arm);
+    const hand = meshSphere(0.06, PALETTE.reyesSkin);
+    hand.position.set(s * 0.27, 0.82, 0);
+    g.add(hand);
+  }
+
+  // Head with short hair.
+  const head = meshSphere(0.19, PALETTE.reyesSkin);
+  head.position.set(0, 1.5, 0);
+  g.add(head);
+  const hair = meshSphere(0.2, PALETTE.reyesHair);
+  hair.scale.set(1, 0.7, 1);
+  hair.position.set(0, 1.57, -0.02);
+  g.add(hair);
+
+  // A cap: a round crown and a short brim facing the room (+z).
+  const crown = meshCyl(0.18, 0.19, 0.14, PALETTE.reyesCap);
+  crown.position.set(0, 1.64, 0);
+  g.add(crown);
+  const brim = meshBox(0.3, 0.04, 0.18, PALETTE.reyesCap);
+  brim.position.set(0, 1.6, 0.2);
+  g.add(brim);
+
+  // Eyes on the +z side so he faces the room.
+  for (const s of [-1, 1]) {
+    const eye = meshSphere(0.025, "#3a2a20");
+    eye.position.set(s * 0.07, 1.52, 0.17);
+    g.add(eye);
+  }
+
+  return g;
+}
+
+// ---- Ms. Okafor, who owns the repair shop. A work skirt and teal smock under a
+// light apron with a screwdriver in the pocket, hair gathered into a bun, glasses
+// across the eyes, standing at GUS_SPOT facing the room (+z). ----
+function buildOkaforFigure(): Group {
+  const g = new Group();
+
+  // Work skirt and a teal smock bodice.
+  const skirt = meshCone(0.4, 0.9, PALETTE.okaforSkirt);
+  skirt.position.set(0, 0.45, 0);
+  g.add(skirt);
+  const bodice = meshCyl(0.2, 0.24, 0.5, PALETTE.okaforSmock);
+  bodice.position.set(0, 1.05, 0);
+  g.add(bodice);
+
+  // A light apron with a pocket and a screwdriver tucked in it.
+  const apron = meshBox(0.4, 0.72, 0.05, PALETTE.okaforApron);
+  apron.position.set(0, 0.76, 0.34);
+  g.add(apron);
+  const pocket = meshBox(0.22, 0.16, 0.04, PALETTE.okaforSmock);
+  pocket.position.set(0, 0.64, 0.37);
+  g.add(pocket);
+  const driver = meshCyl(0.014, 0.014, 0.18, "#d0d4d8");
+  driver.position.set(0.06, 0.78, 0.39);
+  g.add(driver);
+  const driverGrip = meshBox(0.04, 0.06, 0.04, PALETTE.boardRed);
+  driverGrip.position.set(0.06, 0.86, 0.39);
+  g.add(driverGrip);
+
+  // Arms and hands.
+  for (const s of [-1, 1]) {
+    const arm = meshCyl(0.06, 0.06, 0.45, PALETTE.okaforSmock);
+    arm.position.set(s * 0.26, 1.05, 0);
+    g.add(arm);
+    const hand = meshSphere(0.06, PALETTE.okaforSkin);
+    hand.position.set(s * 0.26, 0.82, 0);
+    g.add(hand);
+  }
+
+  // Head, hair gathered into a bun.
+  const head = meshSphere(0.19, PALETTE.okaforSkin);
+  head.position.set(0, 1.52, 0);
+  g.add(head);
+  const hairBack = meshSphere(0.21, PALETTE.okaforHair);
+  hairBack.position.set(0, 1.52, -0.05);
+  g.add(hairBack);
+  const bun = meshSphere(0.11, PALETTE.okaforHair);
+  bun.position.set(0, 1.68, -0.12);
+  g.add(bun);
+
+  // Glasses across the eyes, then the eyes and a touch of cheek, on the +z side.
+  const glasses = meshBox(0.26, 0.05, 0.03, "#2a2a2a");
+  glasses.position.set(0, 1.52, 0.17);
+  g.add(glasses);
+  for (const s of [-1, 1]) {
+    const eye = meshSphere(0.022, "#3a2a20");
+    eye.position.set(s * 0.07, 1.52, 0.16);
+    g.add(eye);
+    const cheek = meshSphere(0.03, PALETTE.cheekPink);
+    cheek.position.set(s * 0.1, 1.48, 0.15);
+    g.add(cheek);
+  }
+
+  return g;
+}
+
 // Build Gus, his cart, his gold "!", and his greeting bubble, then keep an eye
 // on how close the player is and show the right thing.
-function buildGus(world: any) {
-  const GREETING = "Well hello there! Come on over when you are ready, and I will help you make a smart money move.";
+function buildGus(world: any, shop: ShopId) {
+  const GREETING = SHOPS[shop].ownerGreeting;
   const RADIUS = 4.2; // how close you must be for Gus to greet you
 
-  // ---- The cart ----
-  const cart = new Group();
-  const counter = meshBox(1.6, 0.9, 0.8, PALETTE.wood);
-  counter.position.set(0, 0.55, 0);
-  cart.add(counter);
-  const top = meshBox(1.72, 0.12, 0.92, PALETTE.woodDark);
-  top.position.set(0, 1.06, 0);
-  cart.add(top);
-  for (const wz of [-0.32, 0.32]) {
-    const wheel = meshCyl(0.32, 0.32, 0.14, "#3a3a3a", 16);
-    wheel.rotation.x = Math.PI / 2;
-    wheel.position.set(0.72, 0.32, wz);
-    cart.add(wheel);
-  }
-  for (const px of [-0.7, 0.7]) {
-    const post = meshCyl(0.05, 0.05, 1.0, PALETTE.woodDark, 8);
-    post.position.set(px, 1.55, -0.35);
-    cart.add(post);
-  }
-  const awn = new Group();
-  let i = 0;
-  for (const ax of [-0.6, -0.2, 0.2, 0.6]) {
-    const stripe = meshBox(0.4, 0.07, 0.8, i % 2 === 0 ? PALETTE.awningA : PALETTE.awningB);
-    stripe.position.set(ax, 0, 0);
-    awn.add(stripe);
-    i = i + 1;
-  }
-  awn.position.set(0, 2.05, 0.05);
-  awn.rotation.x = -0.35;
-  cart.add(awn);
-  for (const gx of [-0.5, -0.1, 0.3]) {
-    const fruit = meshSphere(0.12, gx === -0.1 ? "#e7b84a" : "#d2452f", 10);
-    fruit.position.set(gx, 1.22, 0.12);
-    cart.add(fruit);
-  }
-  const sign = new Mesh(new PlaneGeometry(1.0, 0.3), new MeshBasicMaterial({ map: makeSignTexture("Gus's Cart"), side: DoubleSide }));
-  sign.position.set(0, 1.0, 0.47);
-  cart.add(sign);
-
-  // ---- Gus the figure, standing behind the counter ----
-  for (const lx of [-0.16, 0.16]) {
-    const leg = meshCyl(0.1, 0.1, 0.7, "#3c4a63", 8);
-    leg.position.set(lx, 0.35, -0.55);
-    cart.add(leg);
-  }
-  const torso = meshCyl(0.26, 0.3, 0.8, "#5b7da6", 10);
-  torso.position.set(0, 1.1, -0.55);
-  cart.add(torso);
-  const apron = meshBox(0.42, 0.6, 0.08, "#caa15a");
-  apron.position.set(0, 1.0, -0.4);
-  cart.add(apron);
-  for (const ax of [-0.32, 0.32]) {
-    const arm = meshCyl(0.08, 0.08, 0.6, "#5b7da6", 8);
-    arm.position.set(ax, 1.15, -0.55);
-    arm.rotation.z = ax > 0 ? -0.3 : 0.3;
-    cart.add(arm);
-  }
-  const head = meshSphere(0.2, "#e8b48c", 14);
-  head.position.set(0, 1.72, -0.55);
-  cart.add(head);
-  const cap = meshCyl(0.22, 0.22, 0.1, "#7a5230", 12);
-  cap.position.set(0, 1.88, -0.55);
-  cart.add(cap);
-  const brim = meshBox(0.38, 0.04, 0.22, "#7a5230");
-  brim.position.set(0, 1.85, -0.4);
-  cart.add(brim);
-  const mustache = meshBox(0.18, 0.05, 0.04, "#f2efe9");
-  mustache.position.set(0, 1.64, -0.36);
-  cart.add(mustache);
+  // The owner figure, chosen by shop. Each is built at its own local origin and
+  // then placed at GUS_SPOT below, just behind the counter, facing the room (+z).
+  let gus: Group;
+  if (shop === "surf") gus = buildReyesFigure();
+  else if (shop === "repair") gus = buildOkaforFigure();
+  else gus = buildDeliaFigure();
 
   // ---- The gold "!" that invites you over ----
   const bang = new Group();
@@ -687,12 +760,12 @@ function buildGus(world: any) {
   dotG.position.set(0, -0.02, 0);
   bang.add(dotG);
   bang.position.set(0, 2.7, 0);
-  cart.add(bang);
+  gus.add(bang);
 
-  // Place the whole stand on the street.
-  const cartE = world.createTransformEntity(cart);
-  cartE.object3D!.position.set(GUS_SPOT.x, 0, GUS_SPOT.z);
-  cartE.object3D!.rotation.y = GUS_SPOT.faceY;
+  // Place Gus behind the counter.
+  const gusE = world.createTransformEntity(gus);
+  gusE.object3D!.position.set(GUS_SPOT.x, 0, GUS_SPOT.z);
+  gusE.object3D!.rotation.y = GUS_SPOT.faceY;
 
   // ---- The greeting bubble. Parked over Gus's head it ran off the TOP of the
   // screen up close (eye height is ~1.6, the bubble sat at 3.1), so you could not
@@ -749,91 +822,334 @@ function buildGus(world: any) {
 }
 
 // ============================================================================
-// MONEY PLANT  —  a potted plant by the bank that grows with Financial Growth.
-// The pot stays the same size; the leafy part scales up smoothly as the Growth
-// meter climbs, so good money habits have something living to show for them.
-// index.ts calls setPlantGrowth() whenever Growth changes.
+// SHOP FURNITURE  —  the two fixtures the panels anchor to. The sales counter
+// (with its little register) stands at the bank station, where the Morning and
+// Daily Report panels appear; the display shelf of products stands at the
+// business station, where the Midday panel appears. Each is a Group built around
+// its own local origin, then dropped at its station the same way Gus's cart is.
 // ============================================================================
-let plantPivot: any = null;     // the growable part (stem, leaves, bloom)
-let plantTargetScale = 0.75;    // where the plant is growing toward
-let plantCurrentScale = 0.75;   // where it is right now (eased toward the target)
 
-// Set how grown the plant should be. frac is 0 (tiny) to 1 (full). A Growth
-// meter of 50 maps to about half grown.
-export function setPlantGrowth(frac: number) {
-  const f = Math.max(0, Math.min(1, frac));
-  plantTargetScale = 0.4 + 0.7 * f;
-}
-
-// A slow loop that eases the plant toward its target size, so growth glides.
-function startPlantAnim() {
-  setInterval(function () {
-    if (!plantPivot) return;
-    plantCurrentScale = plantCurrentScale + (plantTargetScale - plantCurrentScale) * 0.12;
-    plantPivot.scale.setScalar(plantCurrentScale);
-  }, 33);
-}
-
-// Build the pot, the seed coins, and the growable plant, and drop it by the bank.
-function buildMoneyPlant(world: any) {
+// The sales counter: a glass bakery display case. A warm wood base carries a
+// darker wood lip; a low-opacity glass box sits on the lip with little cakes,
+// cupcakes, and a chocolate loaf arranged inside; a register sits at one end.
+function buildSalesCounter(world: any) {
   const g = new Group();
 
-  // Terracotta pot with a rim and soil.
-  const pot = meshCyl(0.34, 0.24, 0.46, "#b5683b", 16);
-  pot.position.set(0, 0.23, 0);
-  g.add(pot);
-  const rim = meshCyl(0.37, 0.37, 0.08, "#9c5430", 16);
-  rim.position.set(0, 0.46, 0);
-  g.add(rim);
-  const soil = meshCyl(0.31, 0.31, 0.06, "#4a3320", 14);
-  soil.position.set(0, 0.48, 0);
-  g.add(soil);
+  const base = meshBox(2.6, 0.9, 0.7, PALETTE.woodWarm);
+  base.position.set(0, 0.45, 0);
+  g.add(base);
 
-  // Two gold coins resting by the pot (the seed money).
-  const coinA = meshSphere(0.1, "#c8962a", 12);
-  coinA.scale.set(1, 0.4, 1);
-  coinA.position.set(0.44, 0.06, 0.16);
-  g.add(coinA);
-  const coinB = meshSphere(0.1, "#c8962a", 12);
-  coinB.scale.set(1, 0.4, 1);
-  coinB.position.set(0.52, 0.06, -0.08);
-  g.add(coinB);
+  const lip = meshBox(2.7, 0.08, 0.75, PALETTE.woodDark2);
+  lip.position.set(0, 0.93, 0);
+  g.add(lip);
 
-  // The growable part: stem, three leaves, and a gold bloom. This whole group
-  // scales together, growing up and out from the soil.
-  const pivot = new Group();
-  pivot.position.set(0, 0.49, 0);
+  // The glass case: see-through so the treats inside read clearly.
+  const glassCase = new Mesh(
+    new BoxGeometry(2.5, 0.55, 0.65),
+    new MeshLambertMaterial({ color: new Color(PALETTE.caseGlass), transparent: true, opacity: 0.22 }),
+  );
+  glassCase.position.set(0, 1.22, 0);
+  g.add(glassCase);
 
-  const stem = meshCyl(0.045, 0.07, 1.1, "#3f8f3a", 8);
-  stem.position.set(0, 0.55, 0);
-  pivot.add(stem);
+  // ---- Treats inside the case, resting on the lip (~y 1.05), spread along x. ----
+  // Two round cakes, each with a cherry on top.
+  for (const cx of [-0.9, 0.3]) {
+    const cake = meshCyl(0.18, 0.18, 0.16, PALETTE.frostCream);
+    cake.position.set(cx, 1.05, 0.06);
+    g.add(cake);
+    const cherry = meshSphere(0.05, PALETTE.cherryRed);
+    cherry.position.set(cx, 1.16, 0.06);
+    g.add(cherry);
+  }
+  // Two cupcakes: a dark wrapper topped with a dome of pink frosting.
+  for (const ux of [-0.5, 0.6]) {
+    const cup = meshCyl(0.1, 0.13, 0.14, PALETTE.woodDark2);
+    cup.position.set(ux, 1.05, -0.06);
+    g.add(cup);
+    const frosting = meshSphere(0.13, PALETTE.frostPink);
+    frosting.position.set(ux, 1.18, -0.06);
+    g.add(frosting);
+  }
+  // One chocolate loaf, a squashed sphere.
+  const loaf = meshSphere(0.14, PALETTE.chocolate);
+  loaf.scale.set(1.6, 0.8, 1);
+  loaf.position.set(-0.05, 1.06, 0);
+  g.add(loaf);
 
-  const leaf1 = meshSphere(0.22, "#57a83f", 12);
-  leaf1.scale.set(1.5, 0.7, 1);
-  leaf1.position.set(0.2, 0.5, 0);
-  pivot.add(leaf1);
-  const leaf2 = meshSphere(0.22, "#57a83f", 12);
-  leaf2.scale.set(1.5, 0.7, 1);
-  leaf2.position.set(-0.2, 0.82, 0);
-  pivot.add(leaf2);
-  const leaf3 = meshSphere(0.26, "#4e9f3a", 12);
-  leaf3.position.set(0, 1.12, 0);
-  pivot.add(leaf3);
-
-  const bloom = meshSphere(0.17, "#c8962a", 14);
-  bloom.position.set(0, 1.34, 0);
-  pivot.add(bloom);
-
-  g.add(pivot);
-  plantPivot = pivot;
-  plantCurrentScale = 0.4 + 0.7 * 0.5; // start matching a Growth meter of 50
-  plantTargetScale = plantCurrentScale;
-  pivot.scale.setScalar(plantCurrentScale);
+  // A small register at one end of the base top.
+  const registerBody = meshBox(0.4, 0.28, 0.32, "#3a4654");
+  registerBody.position.set(0.95, 1.05, 0);
+  g.add(registerBody);
 
   const e = world.createTransformEntity(g);
-  e.object3D!.position.set(STATIONS.bank.x - 2.9, 0, STATIONS.bank.z + 2.4);
+  e.object3D!.position.set(STATIONS.bank.x, 0, STATIONS.bank.z);
+  e.object3D!.rotation.y = STATIONS.bank.faceY;
+}
 
-  startPlantAnim();
+// The display shelf: a back board and three shelf boards stocked with bakery
+// goods — bread loaves, baguettes on their side, and frosted cupcakes — resting
+// on each board (z ~0.25). Every shelf carries all three for a full window.
+function buildDisplayShelf(world: any) {
+  const g = new Group();
+
+  const backBoard = meshBox(2.4, 2.2, 0.12, PALETTE.shopTrim);
+  backBoard.position.set(0, 1.1, 0);
+  g.add(backBoard);
+
+  for (const sy of [0.7, 1.3, 1.9]) {
+    const shelf = meshBox(2.4, 0.08, 0.5, PALETTE.counterTop);
+    shelf.position.set(0, sy, 0.25);
+    g.add(shelf);
+  }
+
+  // A round loaf of crusty bread, squashed into a loaf shape.
+  function addLoaf(x: number, boardTop: number) {
+    const loaf = meshSphere(0.16, PALETTE.breadCrust);
+    loaf.scale.set(1.7, 0.85, 1);
+    loaf.position.set(x, boardTop + 0.14, 0.25);
+    g.add(loaf);
+  }
+  // A baguette lying on its side across the shelf.
+  function addBaguette(x: number, boardTop: number) {
+    const bag = meshCyl(0.06, 0.06, 0.7, PALETTE.breadCrust);
+    bag.rotation.z = Math.PI / 2;
+    bag.position.set(x, boardTop + 0.06, 0.25);
+    g.add(bag);
+  }
+  // A cupcake: cream cup with a dome of pink frosting.
+  function addCupcake(x: number, boardTop: number) {
+    const cup = meshCyl(0.09, 0.12, 0.13, PALETTE.frostCream);
+    cup.position.set(x, boardTop + 0.065, 0.25);
+    g.add(cup);
+    const frosting = meshSphere(0.12, PALETTE.frostPink);
+    frosting.position.set(x, boardTop + 0.2, 0.25);
+    g.add(frosting);
+  }
+
+  // Each shelf board's top surface (board sits at sy, 0.08 tall). A rotating mix
+  // so no two shelves read the same across x = -0.7 / 0 / 0.7.
+  const lowTop = 0.7 + 0.04;
+  addLoaf(-0.7, lowTop);
+  addBaguette(0, lowTop);
+  addCupcake(0.7, lowTop);
+
+  const midTop = 1.3 + 0.04;
+  addBaguette(-0.7, midTop);
+  addCupcake(0, midTop);
+  addLoaf(0.7, midTop);
+
+  const topTop = 1.9 + 0.04;
+  addCupcake(-0.7, topTop);
+  addLoaf(0, topTop);
+  addBaguette(0.7, topTop);
+
+  const e = world.createTransformEntity(g);
+  e.object3D!.position.set(STATIONS.business.x, 0, STATIONS.business.z);
+  e.object3D!.rotation.y = STATIONS.business.faceY;
+}
+
+// ----------------------------------------------------------------------------
+// SURF COUNTER  —  a wood stand with three surfboards leaning in a back rail and
+// a small register, standing where the bakery case stands (the bank station).
+// ----------------------------------------------------------------------------
+function buildSurfCounter(world: any) {
+  const g = new Group();
+
+  const base = meshBox(2.6, 0.9, 0.7, PALETTE.woodWarm);
+  base.position.set(0, 0.45, 0);
+  g.add(base);
+  const lip = meshBox(2.7, 0.08, 0.78, PALETTE.woodDark2);
+  lip.position.set(0, 0.93, 0);
+  g.add(lip);
+
+  // A back rail the boards lean against.
+  const rail = meshBox(2.4, 0.1, 0.1, PALETTE.woodDark2);
+  rail.position.set(0, 1.75, -0.22);
+  g.add(rail);
+
+  // Three boards: elongated flat ellipsoids, fanned slightly, each with a fin.
+  const boardColors = [PALETTE.boardRed, PALETTE.boardYellow, PALETTE.boardTeal];
+  let i = 0;
+  for (const bx of [-0.7, 0, 0.7]) {
+    const board = meshSphere(0.5, boardColors[i % 3]);
+    board.scale.set(0.5, 2.0, 0.12);
+    board.position.set(bx, 1.55, -0.1);
+    board.rotation.z = bx * 0.14;
+    g.add(board);
+    const fin = meshCone(0.06, 0.16, "#2a2a2a");
+    fin.position.set(bx, 0.66, 0.0);
+    g.add(fin);
+    i = i + 1;
+  }
+
+  const reg = meshBox(0.4, 0.28, 0.32, PALETTE.register);
+  reg.position.set(0.95, 1.05, 0);
+  g.add(reg);
+
+  const e = world.createTransformEntity(g);
+  e.object3D!.position.set(STATIONS.bank.x, 0, STATIONS.bank.z);
+  e.object3D!.rotation.y = STATIONS.bank.faceY;
+}
+
+// ----------------------------------------------------------------------------
+// SURF SHELF  —  the same three-board shelf shape as the bakery, stocked with
+// wetsuits, rash guards, wax, and sunscreen, at the business station.
+// ----------------------------------------------------------------------------
+function buildSurfShelf(world: any) {
+  const g = new Group();
+
+  const backBoard = meshBox(2.4, 2.2, 0.12, PALETTE.shopTrim);
+  backBoard.position.set(0, 1.1, 0);
+  g.add(backBoard);
+  for (const sy of [0.7, 1.3, 1.9]) {
+    const shelf = meshBox(2.4, 0.08, 0.5, PALETTE.counterTop);
+    shelf.position.set(0, sy, 0.25);
+    g.add(shelf);
+  }
+
+  function wetsuit(x: number, top: number) {
+    const w = meshBox(0.3, 0.52, 0.1, "#243240");
+    w.position.set(x, top + 0.28, 0.25);
+    g.add(w);
+  }
+  function rashguard(x: number, top: number, color: string) {
+    const r = meshBox(0.34, 0.34, 0.08, color);
+    r.position.set(x, top + 0.21, 0.25);
+    g.add(r);
+  }
+  function waxStack(x: number, top: number) {
+    const c = meshBox(0.16, 0.12, 0.16, "#f0ead2");
+    c.position.set(x, top + 0.1, 0.25);
+    g.add(c);
+  }
+  function sunscreen(x: number, top: number) {
+    const s = meshCyl(0.06, 0.06, 0.2, "#f2a93a");
+    s.position.set(x, top + 0.14, 0.25);
+    g.add(s);
+  }
+
+  const lowTop = 0.74;
+  wetsuit(-0.7, lowTop); rashguard(0, lowTop, PALETTE.boardRed); sunscreen(0.7, lowTop);
+  const midTop = 1.34;
+  rashguard(-0.7, midTop, PALETTE.boardTeal); waxStack(0, midTop); wetsuit(0.7, midTop);
+  const topTop = 1.94;
+  sunscreen(-0.7, topTop); wetsuit(0, topTop); rashguard(0.7, topTop, PALETTE.boardYellow);
+
+  const e = world.createTransformEntity(g);
+  e.object3D!.position.set(STATIONS.business.x, 0, STATIONS.business.z);
+  e.object3D!.rotation.y = STATIONS.business.faceY;
+}
+
+// ----------------------------------------------------------------------------
+// REPAIR COUNTER  —  a worktop with a parts tray, a phone laid open for repair,
+// a tablet propped up on a small stand, and a register, at the bank station.
+// ----------------------------------------------------------------------------
+function buildRepairCounter(world: any) {
+  const g = new Group();
+
+  const base = meshBox(2.6, 0.9, 0.7, PALETTE.woodWarm);
+  base.position.set(0, 0.45, 0);
+  g.add(base);
+  const top = meshBox(2.7, 0.08, 0.78, "#9aa3ab");
+  top.position.set(0, 0.93, 0);
+  g.add(top);
+
+  // A parts tray with a few small chips.
+  const tray = meshBox(0.7, 0.06, 0.4, "#3a4048");
+  tray.position.set(-0.6, 1.0, 0);
+  g.add(tray);
+  for (const px of [-0.78, -0.6, -0.42]) {
+    const chip = meshBox(0.08, 0.04, 0.08, PALETTE.boardTeal);
+    chip.position.set(px, 1.05, 0.0);
+    g.add(chip);
+  }
+
+  // A phone laid open on the bench, screen up.
+  const phone = meshBox(0.18, 0.03, 0.34, "#2a3038");
+  phone.position.set(0.15, 1.0, 0.05);
+  g.add(phone);
+  const phoneScreen = meshBox(0.15, 0.012, 0.3, "#5fb0e0");
+  phoneScreen.position.set(0.15, 1.02, 0.05);
+  g.add(phoneScreen);
+
+  // A tablet propped upright on a little stand, facing the room.
+  const stand = meshBox(0.06, 0.18, 0.12, "#3a4048");
+  stand.position.set(0.7, 1.02, -0.05);
+  g.add(stand);
+  const tablet = meshBox(0.34, 0.46, 0.03, "#2a3038");
+  tablet.position.set(0.7, 1.28, 0.0);
+  tablet.rotation.x = -0.18;
+  g.add(tablet);
+  const tabletScreen = meshBox(0.3, 0.4, 0.012, "#7fd0f0");
+  tabletScreen.position.set(0.7, 1.28, 0.02);
+  tabletScreen.rotation.x = -0.18;
+  g.add(tabletScreen);
+
+  const reg = meshBox(0.4, 0.28, 0.32, PALETTE.register);
+  reg.position.set(0.98, 1.05, 0);
+  g.add(reg);
+
+  const e = world.createTransformEntity(g);
+  e.object3D!.position.set(STATIONS.bank.x, 0, STATIONS.bank.z);
+  e.object3D!.rotation.y = STATIONS.bank.faceY;
+}
+
+// ----------------------------------------------------------------------------
+// REPAIR SHELF  —  the three-board shelf stocked with phones, tablets, and
+// open laptops, at the business station.
+// ----------------------------------------------------------------------------
+function buildRepairShelf(world: any) {
+  const g = new Group();
+
+  const backBoard = meshBox(2.4, 2.2, 0.12, PALETTE.shopTrim);
+  backBoard.position.set(0, 1.1, 0);
+  g.add(backBoard);
+  for (const sy of [0.7, 1.3, 1.9]) {
+    const shelf = meshBox(2.4, 0.08, 0.5, PALETTE.counterTop);
+    shelf.position.set(0, sy, 0.25);
+    g.add(shelf);
+  }
+
+  function phone(x: number, top: number, screen: string) {
+    const b = meshBox(0.16, 0.3, 0.03, "#2a3038");
+    b.position.set(x, top + 0.18, 0.25);
+    g.add(b);
+    const s = meshBox(0.13, 0.26, 0.012, screen);
+    s.position.set(x, top + 0.19, 0.27);
+    g.add(s);
+  }
+  function tablet(x: number, top: number) {
+    const b = meshBox(0.3, 0.4, 0.03, "#2a3038");
+    b.position.set(x, top + 0.23, 0.25);
+    g.add(b);
+    const s = meshBox(0.26, 0.36, 0.012, "#7fd0f0");
+    s.position.set(x, top + 0.24, 0.27);
+    g.add(s);
+  }
+  function laptop(x: number, top: number) {
+    const base2 = meshBox(0.42, 0.03, 0.3, "#b8bfc6");
+    base2.position.set(x, top + 0.06, 0.22);
+    g.add(base2);
+    const screen = meshBox(0.42, 0.28, 0.02, "#b8bfc6");
+    screen.position.set(x, top + 0.2, 0.1);
+    screen.rotation.x = -0.32;
+    g.add(screen);
+    const lit = meshBox(0.37, 0.23, 0.012, "#5fb0e0");
+    lit.position.set(x, top + 0.2, 0.115);
+    lit.rotation.x = -0.32;
+    g.add(lit);
+  }
+
+  const lowTop = 0.74;
+  phone(-0.75, lowTop, PALETTE.boardTeal); laptop(0.25, lowTop);
+  const midTop = 1.34;
+  tablet(-0.7, midTop); phone(0.15, midTop, "#5fb0e0"); phone(0.7, midTop, PALETTE.boardYellow);
+  const topTop = 1.94;
+  laptop(-0.45, topTop); tablet(0.55, topTop);
+
+  const e = world.createTransformEntity(g);
+  e.object3D!.position.set(STATIONS.business.x, 0, STATIONS.business.z);
+  e.object3D!.rotation.y = STATIONS.business.faceY;
 }
 
 // ============================================================================
@@ -899,15 +1215,15 @@ function buildAmbientLife(world: any) {
     t = t + 1;
 
     // Dog: trots back and forth, faces the way it walks, with a little bounce.
-    dogObj.position.set(Math.sin(t * 0.025) * 4.0, Math.abs(Math.sin(t * 0.3)) * 0.05, -2.8);
+    dogObj.position.set(Math.sin(t * 0.025) * 1.75, Math.abs(Math.sin(t * 0.3)) * 0.05, -10.5);
     dogObj.rotation.y = Math.cos(t * 0.025) > 0 ? 0 : Math.PI;
 
     // Person: a slow stroll along the road.
-    personObj.position.set(Math.sin(t * 0.015) * 6.0, 0, -4.4);
+    personObj.position.set(Math.sin(t * 0.015) * 6.0, 0, -9.6);
 
     // Bird 1: a wide circle with flapping wings.
     const a1 = t * 0.03;
-    bird1Obj.position.set(Math.cos(a1) * 5.0, 3.4 + Math.sin(t * 0.1) * 0.3, -5 + Math.sin(a1) * 4.0);
+    bird1Obj.position.set(Math.cos(a1) * 5.0, 3.4 + Math.sin(t * 0.1) * 0.3, -12 + Math.sin(a1) * 4.0);
     bird1Obj.rotation.y = -a1;
     const flap1 = Math.sin(t * 0.8) * 0.6;
     b1.wingL.rotation.x = flap1;
@@ -915,7 +1231,7 @@ function buildAmbientLife(world: any) {
 
     // Bird 2: a smaller, offset circle.
     const a2 = t * 0.026 + 2.0;
-    bird2Obj.position.set(2 + Math.cos(a2) * 4.0, 3.9 + Math.sin(t * 0.12) * 0.3, -5 + Math.sin(a2) * 3.2);
+    bird2Obj.position.set(2 + Math.cos(a2) * 4.0, 3.9 + Math.sin(t * 0.12) * 0.3, -12 + Math.sin(a2) * 3.2);
     bird2Obj.rotation.y = -a2;
     const flap2 = Math.sin(t * 0.9) * 0.6;
     b2.wingL.rotation.x = flap2;
@@ -924,21 +1240,411 @@ function buildAmbientLife(world: any) {
 }
 
 // ----------------------------------------------------------------------------
-// buildEnvironment  —  put the whole street together. Returns the walkable
-// ground so index.ts can mark it for locomotion. Signature unchanged.
+// buildBaseWorld  —  the parts that are the same no matter which shop you run:
+// the sky and lights, the walkable floor, the walls, and the street outside the
+// window. Returns the floor (ground) and walls (boundary) so index.ts can make
+// them locomotion collision, exactly as before.
+// ----------------------------------------------------------------------------
+export function buildBaseWorld(world: any) {
+  buildSkyAndLights(world);
+  const ground = buildShopFloor(world);
+  const boundary = buildShopWalls(world);
+  const street = buildStreetView(world);
+  return { ground, boundary, street };
+}
+
+// ----------------------------------------------------------------------------
+// recolorShop  —  repaint the captured shell materials for the chosen shop. The
+// bakery keeps its default cream-and-rose look; surf gets a sandy checker floor
+// and ocean-blue walls. Reuses the same materials, so nothing is rebuilt.
+// ----------------------------------------------------------------------------
+function recolorShop(shop: ShopId) {
+  if (shop === "surf") {
+    if (_floorMat) {
+      const old = _floorMat.map;
+      _floorMat.map = makeCheckerTexture(PALETTE.surfSand1, PALETTE.surfSand2);
+      _floorMat.needsUpdate = true;
+      if (old) old.dispose();
+    }
+    for (const m of _wallMats) m.color.set(PALETTE.surfWall);
+    for (const m of _wainscotMats) m.color.set(PALETTE.surfWainscot);
+  } else if (shop === "repair") {
+    if (_floorMat) {
+      const old = _floorMat.map;
+      _floorMat.map = makeCheckerTexture(PALETTE.repairFloor1, PALETTE.repairFloor2);
+      _floorMat.needsUpdate = true;
+      if (old) old.dispose();
+    }
+    for (const m of _wallMats) m.color.set(PALETTE.repairWall);
+    for (const m of _wainscotMats) m.color.set(PALETTE.repairWainscot);
+  }
+}
+
+// ----------------------------------------------------------------------------
+// buildShopProps  —  the parts that change per shop: the storefront sign, the
+// sales counter and its case, the display shelf, and the owner. For now this
+// always builds the bakery; the surf and repair versions arrive in the next
+// two stages, switched on the shop argument.
+// ----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
+// BAKERY SCENERY  —  café life in the open front of the room: two bistro tables
+// with chairs, a specials board by the door, and two potted plants. Everything
+// sits at z 4 and up, clear of the counter and shelf (z 0), the owner (z 1.6),
+// and the walkway down the middle. Positions below are easy to nudge. Bakery only.
+// ----------------------------------------------------------------------------
+function buildBakeryScenery(world: any) {
+  // Drop a finished group onto the floor at x,z, turned ry radians.
+  function place(g: Group, x: number, z: number, ry: number) {
+    const e = world.createTransformEntity(g);
+    e.object3D!.position.set(x, 0, z);
+    e.object3D!.rotation.y = ry;
+  }
+
+  // Round bistro table: metal base, slim pole, round wooden top (~0.76 tall).
+  function table(): Group {
+    const g = new Group();
+    const base = meshCyl(0.26, 0.3, 0.05, "#6f6f6f");
+    base.position.set(0, 0.03, 0);
+    g.add(base);
+    const pole = meshCyl(0.04, 0.04, 0.7, "#7c7c7c");
+    pole.position.set(0, 0.4, 0);
+    g.add(pole);
+    const top = meshCyl(0.4, 0.4, 0.05, PALETTE.woodWarm);
+    top.position.set(0, 0.76, 0);
+    g.add(top);
+    return g;
+  }
+
+  // Simple chair: seat, four legs, a low back. The back is on the -z side, so a
+  // chair placed with ry 0 faces +z (toward the table in front of it).
+  function chair(): Group {
+    const g = new Group();
+    const seat = meshBox(0.34, 0.05, 0.34, PALETTE.woodWarm);
+    seat.position.set(0, 0.45, 0);
+    g.add(seat);
+    for (const lx of [-0.14, 0.14]) {
+      for (const lz of [-0.14, 0.14]) {
+        const leg = meshBox(0.045, 0.45, 0.045, PALETTE.woodDark2);
+        leg.position.set(lx, 0.225, lz);
+        g.add(leg);
+      }
+    }
+    const back = meshBox(0.34, 0.42, 0.05, PALETTE.woodWarm);
+    back.position.set(0, 0.68, -0.15);
+    g.add(back);
+    return g;
+  }
+
+  // Specials board: two posts holding a dark chalk slate. Faces +z at ry 0.
+  function board(): Group {
+    const g = new Group();
+    for (const px of [-0.3, 0.3]) {
+      const post = meshBox(0.05, 1.2, 0.05, PALETTE.woodDark2);
+      post.position.set(px, 0.6, 0);
+      g.add(post);
+    }
+    const frame = meshBox(0.74, 0.64, 0.06, PALETTE.woodWarm);
+    frame.position.set(0, 1.0, 0);
+    g.add(frame);
+    const slate = meshBox(0.64, 0.54, 0.07, "#33403a");
+    slate.position.set(0, 1.0, 0.015);
+    g.add(slate);
+    return g;
+  }
+
+  // Potted plant: terracotta pot, leafy dome.
+  function plant(): Group {
+    const g = new Group();
+    const pot = meshCyl(0.17, 0.12, 0.3, "#b5654d");
+    pot.position.set(0, 0.15, 0);
+    g.add(pot);
+    const leaves = meshSphere(0.3, PALETTE.leaf);
+    leaves.position.set(0, 0.55, 0);
+    g.add(leaves);
+    return g;
+  }
+
+  // --- Placement (x, z, turn). Nudge these to taste. ---
+  // The open floor BEYOND the counter (z below 0), toward the storefront windows.
+  // The counter and shelf sit at z 0; the front wall is at z -8; this fills between.
+  // Three tables with facing chairs, spread across the space.
+  place(table(), -3.0, -2.0, 0);
+  place(chair(), -3.0, -1.4, 0);
+  place(chair(), -3.0, -2.6, Math.PI);
+  place(table(), 3.0, -2.0, 0);
+  place(chair(), 3.0, -1.4, 0);
+  place(chair(), 3.0, -2.6, Math.PI);
+  place(table(), 0, -4.8, 0);
+  place(chair(), 0, -4.2, 0);
+  place(chair(), 0, -5.4, Math.PI);
+
+  // Specials board to one side of the seating, turned to face in.
+  place(board(), -3.6, -4.6, Math.PI / 2);
+
+  // Plants in the back corners, by the storefront windows.
+  place(plant(), 4.6, -6.2, 0);
+  place(plant(), -4.6, -6.2, 0);
+}
+
+// ----------------------------------------------------------------------------
+// SURF SCENERY  —  Atlantic Avenue Surf Co. Fills the open floor beyond the
+// counter (z below 0), toward the storefront windows: a board rack, two
+// driftwood benches, a wetsuit on a stand, and beach grass. Surf only.
+// ----------------------------------------------------------------------------
+function buildSurfScenery(world: any) {
+  function place(g: Group, x: number, z: number, ry: number) {
+    const e = world.createTransformEntity(g);
+    e.object3D!.position.set(x, 0, z);
+    e.object3D!.rotation.y = ry;
+  }
+
+  // One surfboard standing on its tail: colored body, a stripe, a small fin.
+  function surfboard(color: string, stripe: string, h: number): Group {
+    const g = new Group();
+    const body = meshBox(0.42, h, 0.07, color);
+    body.position.set(0, h / 2 + 0.1, 0);
+    g.add(body);
+    const str = meshBox(0.07, h, 0.075, stripe);
+    str.position.set(0, h / 2 + 0.1, 0.002);
+    g.add(str);
+    const fin = meshBox(0.04, 0.16, 0.14, "#243640");
+    fin.position.set(0, 0.18, -0.08);
+    g.add(fin);
+    return g;
+  }
+
+  // A floor rack holding three boards upright in a row.
+  function boardRack(): Group {
+    const g = new Group();
+    const base = meshBox(1.7, 0.14, 0.42, "#8a6a45");
+    base.position.set(0, 0.07, 0);
+    g.add(base);
+    const rail = meshBox(1.7, 0.07, 0.07, "#6a4f30");
+    rail.position.set(0, 1.2, -0.16);
+    g.add(rail);
+    const b1 = surfboard("#e8794a", "#fff3e0", 1.6);
+    b1.position.set(-0.55, 0, 0);
+    g.add(b1);
+    const b2 = surfboard("#2a8aa8", "#eaf6f8", 1.5);
+    b2.position.set(0, 0, 0);
+    g.add(b2);
+    const b3 = surfboard("#e94f64", "#ffe0e6", 1.55);
+    b3.position.set(0.55, 0, 0);
+    g.add(b3);
+    return g;
+  }
+
+  // A weathered driftwood bench: seat, four legs, two back slats.
+  function bench(): Group {
+    const g = new Group();
+    const seat = meshBox(1.4, 0.08, 0.4, "#a89478");
+    seat.position.set(0, 0.45, 0);
+    g.add(seat);
+    for (const lx of [-0.6, 0.6]) {
+      for (const lz of [-0.15, 0.15]) {
+        const leg = meshBox(0.07, 0.45, 0.07, "#8a7860");
+        leg.position.set(lx, 0.225, lz);
+        g.add(leg);
+      }
+    }
+    for (const by of [0.62, 0.78]) {
+      const slat = meshBox(1.4, 0.08, 0.05, "#a89478");
+      slat.position.set(0, by, -0.16);
+      g.add(slat);
+    }
+    return g;
+  }
+
+  // A wetsuit hanging on a stand.
+  function wetsuit(): Group {
+    const g = new Group();
+    const base = meshCyl(0.24, 0.28, 0.05, "#5a5a5a");
+    base.position.set(0, 0.025, 0);
+    g.add(base);
+    const post = meshCyl(0.04, 0.04, 1.5, "#6a6a6a");
+    post.position.set(0, 0.75, 0);
+    g.add(post);
+    const bar = meshBox(0.5, 0.04, 0.04, "#6a6a6a");
+    bar.position.set(0, 1.45, 0);
+    g.add(bar);
+    const torso = meshBox(0.36, 0.5, 0.14, "#1f2a33");
+    torso.position.set(0, 1.12, 0.04);
+    g.add(torso);
+    const stripe = meshBox(0.36, 0.06, 0.15, "#2a8aa8");
+    stripe.position.set(0, 0.98, 0.04);
+    g.add(stripe);
+    for (const lx of [-0.1, 0.1]) {
+      const leg = meshBox(0.14, 0.5, 0.12, "#1f2a33");
+      leg.position.set(lx, 0.66, 0.04);
+      g.add(leg);
+    }
+    return g;
+  }
+
+  // Beach grass in a sandy pot.
+  function plant(): Group {
+    const g = new Group();
+    const pot = meshCyl(0.18, 0.13, 0.3, "#caa26a");
+    pot.position.set(0, 0.15, 0);
+    g.add(pot);
+    for (const bx of [-0.07, 0, 0.07]) {
+      for (const bz of [-0.06, 0.06]) {
+        const blade = meshCone(0.05, 0.75, "#5aa46a");
+        blade.position.set(bx, 0.62, bz);
+        g.add(blade);
+      }
+    }
+    return g;
+  }
+
+  // --- Placement (x, z, turn). Open floor beyond the counter; nudge to taste. ---
+  place(boardRack(), 0, -5.2, 0);
+  place(bench(), -3.2, -2.2, 0);
+  place(bench(), 3.2, -2.2, 0);
+  place(wetsuit(), -3.4, -4.6, 0);
+  place(plant(), -4.6, -6.4, 0);
+  place(plant(), 4.4, -5.2, 0);
+}
+
+// ----------------------------------------------------------------------------
+// REPAIR SCENERY  —  Clarendon Device Repair. Fills the open floor beyond the
+// counter (z below 0): a row of waiting seats, a tall parts shelf, a work table
+// with a device on it, and two office plants. Repair only.
+// ----------------------------------------------------------------------------
+function buildRepairScenery(world: any) {
+  function place(g: Group, x: number, z: number, ry: number) {
+    const e = world.createTransformEntity(g);
+    e.object3D!.position.set(x, 0, z);
+    e.object3D!.rotation.y = ry;
+  }
+
+  // A row of three connected waiting-room seats on a metal frame.
+  function waitingSeats(): Group {
+    const g = new Group();
+    const frame = "#7a828c";
+    let sx = -0.7;
+    for (let i = 0; i < 3; i++) {
+      const seat = meshBox(0.46, 0.07, 0.44, "#46708c");
+      seat.position.set(sx, 0.45, 0);
+      g.add(seat);
+      const back = meshBox(0.46, 0.42, 0.06, "#46708c");
+      back.position.set(sx, 0.67, -0.19);
+      g.add(back);
+      sx += 0.7;
+    }
+    const rail = meshBox(2.25, 0.06, 0.1, frame);
+    rail.position.set(0, 0.4, 0.1);
+    g.add(rail);
+    for (const lx of [-0.95, 0.95]) {
+      const leg = meshBox(0.07, 0.4, 0.42, frame);
+      leg.position.set(lx, 0.2, 0);
+      g.add(leg);
+    }
+    return g;
+  }
+
+  // A tall parts shelf: four posts, three shelves, small colored boxes on each.
+  function partsShelf(): Group {
+    const g = new Group();
+    const frame = "#5a626c";
+    for (const px of [-0.7, 0.7]) {
+      for (const pz of [-0.2, 0.2]) {
+        const post = meshBox(0.06, 1.8, 0.06, frame);
+        post.position.set(px, 0.9, pz);
+        g.add(post);
+      }
+    }
+    const cols = ["#46708c", "#c8704a", "#5aa46a", "#d6b24a", "#7a6aa8", "#4a90c8"];
+    let ci = 0;
+    for (const sy of [0.4, 0.9, 1.4]) {
+      const shelf = meshBox(1.55, 0.05, 0.46, "#8a929c");
+      shelf.position.set(0, sy, 0);
+      g.add(shelf);
+      for (const bx of [-0.45, 0, 0.45]) {
+        const box = meshBox(0.3, 0.18, 0.3, cols[ci % cols.length]);
+        box.position.set(bx, sy + 0.12, 0);
+        g.add(box);
+        ci++;
+      }
+    }
+    return g;
+  }
+
+  // A small work table with a device and a tool on top.
+  function workTable(): Group {
+    const g = new Group();
+    const top = meshBox(1.0, 0.06, 0.5, "#8a929c");
+    top.position.set(0, 0.75, 0);
+    g.add(top);
+    for (const lx of [-0.42, 0.42]) {
+      for (const lz of [-0.18, 0.18]) {
+        const leg = meshBox(0.05, 0.75, 0.05, "#5a626c");
+        leg.position.set(lx, 0.375, lz);
+        g.add(leg);
+      }
+    }
+    const device = meshBox(0.4, 0.03, 0.28, "#2a3038");
+    device.position.set(-0.1, 0.79, 0);
+    g.add(device);
+    const screen = meshBox(0.34, 0.035, 0.22, "#4a90c8");
+    screen.position.set(-0.1, 0.8, 0);
+    g.add(screen);
+    const tool = meshBox(0.16, 0.025, 0.03, "#c4c4c4");
+    tool.position.set(0.28, 0.78, 0.1);
+    g.add(tool);
+    return g;
+  }
+
+  // A leafy office plant in a grey planter.
+  function plant(): Group {
+    const g = new Group();
+    const pot = meshCyl(0.16, 0.13, 0.3, "#6a6f76");
+    pot.position.set(0, 0.15, 0);
+    g.add(pot);
+    const f1 = meshSphere(0.32, "#4e8f5a");
+    f1.position.set(0, 0.56, 0);
+    g.add(f1);
+    const f2 = meshSphere(0.22, "#5aa46a");
+    f2.position.set(0.12, 0.72, 0.08);
+    g.add(f2);
+    return g;
+  }
+
+  // --- Placement (x, z, turn). Open floor beyond the counter; nudge to taste. ---
+  place(waitingSeats(), -2.8, -2.2, 0);
+  place(workTable(), 3.2, -2.4, 0);
+  place(partsShelf(), 0, -5.8, 0);
+  place(plant(), -4.4, -5.6, 0);
+  place(plant(), 4.4, -5.6, 0);
+}
+
+export function buildShopProps(world: any, shop: ShopId) {
+  recolorShop(shop);
+  buildStorefrontSign(world, SHOPS[shop].shopName);
+  if (shop === "surf") {
+    buildSurfCounter(world);
+    buildSurfShelf(world);
+    buildSurfScenery(world);
+  } else if (shop === "repair") {
+    buildRepairCounter(world);
+    buildRepairShelf(world);
+    buildRepairScenery(world);
+  } else {
+    buildSalesCounter(world);
+    buildDisplayShelf(world);
+    buildBakeryScenery(world);
+  }
+  buildGus(world, shop);
+}
+
+// ----------------------------------------------------------------------------
+// buildEnvironment  —  kept so index.ts still works unchanged for now. It builds
+// the shell and then the bakery props, exactly like before, and returns the same
+// { ground, boundary }. The next stage switches index.ts over to call the two
+// helpers directly so the props can wait until a shop is picked.
 // ----------------------------------------------------------------------------
 export function buildEnvironment(world: any) {
-  buildSkyAndLights(world);
-  const ground = buildStreet(world);
-  const boundary = buildBoundary(world);
-  buildHome(world, STATIONS.home.x, STATIONS.home.z, STATIONS.home.faceY);
-  buildBank(world, STATIONS.bank.x, STATIONS.bank.z, STATIONS.bank.faceY);
-  buildStore(world, STATIONS.store.x, STATIONS.store.z, STATIONS.store.faceY);
-  buildBusinessLot(world, STATIONS.business.x, STATIONS.business.z, STATIONS.business.faceY);
-  buildTrees(world);
-  buildLamps(world);
-  buildGus(world);
-  buildMoneyPlant(world);
-  buildAmbientLife(world);
-  return { ground, boundary };
+  const base = buildBaseWorld(world);
+  buildShopProps(world, "bakery");
+  return base;
 }
