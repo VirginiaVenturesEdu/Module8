@@ -851,9 +851,11 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   });
 
   // --- Where the dashboard sits in your view (metres). Tune these in headset. ---
-  const DASH_DIST = 1.4;   // how far in front of you
-  const DASH_DROP = 0.45;  // how far below your eye line
-  const DASH_SIDE = -0.6;  // sideways shift (negative = left)
+  // Kept low and off to the left so it reads like a glance-down instrument panel
+  // instead of floating in your forward gaze and covering the world / other panels.
+  const DASH_DIST = 1.45;  // how far in front of you
+  const DASH_DROP = 0.95;  // how far below your eye line (top edge sits well under gaze)
+  const DASH_SIDE = -0.78; // sideways shift (negative = left), clear of the center line
   const DASH_LERP = 0.18;  // 0..1, how quickly it catches up when you turn
 
   const _dashEye = new Vector3();
@@ -887,8 +889,14 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     } else {
       o3d.position.lerp(_dashTarget, DASH_LERP); // smooth follow afterwards
     }
-    // Face the player, staying upright.
-    o3d.rotation.set(0, Math.atan2(_dashEye.x - o3d.position.x, _dashEye.z - o3d.position.z), 0, "YXZ");
+    // Face the player. Because it now sits low, tilt it up so the face aims at
+    // the eyes (like a car dashboard) instead of lying flat below your view.
+    const _dashDX = _dashEye.x - o3d.position.x;
+    const _dashDY = _dashEye.y - o3d.position.y;
+    const _dashDZ = _dashEye.z - o3d.position.z;
+    const _dashYaw = Math.atan2(_dashDX, _dashDZ);
+    const _dashPitch = -Math.atan2(_dashDY, Math.hypot(_dashDX, _dashDZ));
+    o3d.rotation.set(_dashPitch, _dashYaw, 0, "YXZ");
     refreshVrDashboard();
   }, 33);
 
