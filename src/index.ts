@@ -25,7 +25,7 @@ import {
   Box3,
 } from "@iwsdk/core";
 
-import { buildBaseWorld, buildShopProps, setStageLook, buildBeacon, GUS_SPOT, STATIONS } from "./environment";
+import { buildBaseWorld, buildShopProps, setStageLook, buildBeacon, buildCustomers, GUS_SPOT, STATIONS } from "./environment";
 import { setActiveShop, activeShop, SHOPS, ShopId, ShopPack, ChoiceOption, ShopDecision, ECONOMY } from "./shops";
 import { sfxStage, sfxClick, sfxCoin, sfxDown, sfxFanfare } from "./sfx";
 
@@ -45,6 +45,27 @@ let priceTier = "";     // "premium" | "fair" | "bargain" — set in the morning
 let stockTier = "";     // "fancy" | "mix" | "bulk" — set in the morning
 let flyerChosen = false; // true if the ad flyer growth move was bought
 let dealChosen = false;  // true if the bulk-supply deal growth move was bought
+
+// DAY 2 replay mode — a tighter-margins encore with a random surprise, so a
+// second run feels different and worth taking. The day number is stashed in
+// localStorage so "Try Day 2" can carry it across the Play Again reload.
+let dayNumber = 1;
+try {
+  if (localStorage.getItem("bossForADay:day") === "2") dayNumber = 2;
+} catch { /* storage blocked; stay on Day 1 */ }
+const isDay2 = dayNumber === 2;
+const DAY2_START_CASH = 110;      // a thinner register float than Day 1's 150
+const DAY2_REVENUE_FACTOR = 0.9;  // margins are tighter, so each rush earns less
+// A random midday surprise (positive or negative), because not everything a
+// real owner faces is a choice. Worded so it fits any of the three shops.
+const DAY2_SURPRISES = [
+  { text: "Surprise! A pipe burst overnight — the fix cost you $30.", cash: -30 },
+  { text: "A local reviewer loved the place and left a $40 tip!", cash: 40 },
+  { text: "Slow foot traffic today — you lost about $20 in sales.", cash: -20 },
+  { text: "You found $25 tucked in the old register drawer!", cash: 25 },
+  { text: "A supplier overcharged you last week and refunded $35.", cash: 35 },
+  { text: "A power flicker spoiled some stock — that cost you $28.", cash: -28 },
+];
 
 // Every choice the student makes is logged here as it happens, so the daily
 // report can recap the day, name the best call and the one to rethink, and hand
@@ -389,7 +410,7 @@ function createHUD() {
   header.style.marginBottom = "8px";
 
   const title = document.createElement("span");
-  title.textContent = "Boss for a Day";
+  title.textContent = isDay2 ? "Boss for a Day · Day 2" : "Boss for a Day";
   title.style.color = COLOR_NAVY;
   title.style.fontWeight = "800";
   title.style.fontSize = "15px";
@@ -698,6 +719,7 @@ function computeRush(base: number): number {
     : ECONOMY.stockMixFactor;
   let r = base * pf * sf;
   if (flyerChosen) r += ECONOMY.flyerBonus;
+  if (isDay2) r *= DAY2_REVENUE_FACTOR; // tighter margins on the encore day
   return Math.round(r);
 }
 
@@ -706,7 +728,7 @@ function computeRush(base: number): number {
 function startDay() {
   if (dayStarted) return;
   dayStarted = true;
-  dayStartCash = ECONOMY.startingCash;
+  dayStartCash = isDay2 ? DAY2_START_CASH : ECONOMY.startingCash;
   dayMoneyIn = 0;
   dayMoneyOut = 0;
   priceTier = "";
@@ -715,6 +737,21 @@ function startDay() {
   dealChosen = false;
   dayDecisions = [];
   setMoney(dayStartCash);
+}
+
+// Day 2's random midday surprise: a cash swing you did not choose, shown on the
+// objective line for a few seconds (and read aloud if TTS is on) before the day
+// carries on. Logged so it appears in the daily recap too.
+function fireDay2Surprise() {
+  const s = DAY2_SURPRISES[Math.floor(Math.random() * DAY2_SURPRISES.length)];
+  if (s.cash > 0) earn(s.cash);
+  else spend(-s.cash);
+  recordDecision("Day 2 surprise", s.text, s.text, 0);
+  setObjective(s.text);
+  const restore = activeShop.goals.afternoonFind;
+  setTimeout(function () {
+    if (currentPhase === PHASE_AFTERNOON) setObjective(restore);
+  }, 4800);
 }
 
 // The little counting animation behind changeMoney().
@@ -1068,6 +1105,36 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     _beaconT = _beaconT + 1;
     o3d.position.set(beaconTarget.x, 2.5 + Math.sin(_beaconT * 0.12) * 0.09, beaconTarget.z);
     o3d.visible = true;
+  }, 33);
+
+  // --------------------------------------------------------------------------
+  // AMBIENT CUSTOMERS
+  // A few shoppers stroll into the shop during the midday rush, so the busiest
+  // part of the day actually looks busy. They walk in staggered, mill near the
+  // floor, and clear out (and reset) once the rush is over.
+  // --------------------------------------------------------------------------
+  const customers = buildCustomers(world);
+  const custProgress = customers.map(function (_c, i) { return -i * 0.4; }); // staggered entrances
+  tick(function () {
+    const midday = currentPhase === PHASE_MIDDAY;
+    for (let i = 0; i < customers.length; i = i + 1) {
+      const c = customers[i];
+      const o3d = c.entity.object3D;
+      if (!o3d) continue;
+      if (!midday) {
+        if (o3d.visible) o3d.visible = false;
+        custProgress[i] = -i * 0.4; // rewind so they walk in fresh next midday
+        continue;
+      }
+      custProgress[i] = Math.min(1, custProgress[i] + 0.006);
+      const p = custProgress[i] < 0 ? 0 : custProgress[i];
+      const e = 1 - (1 - p) * (1 - p); // ease-out so they slow as they arrive
+      const x = c.start.x + (c.target.x - c.start.x) * e;
+      const z = c.start.z + (c.target.z - c.start.z) * e;
+      const bob = p < 1 ? Math.abs(Math.sin(p * 42)) * 0.045 : 0; // a little walk bounce
+      o3d.position.set(x, bob, z);
+      o3d.visible = true;
+    }
   }, 33);
 
   // --------------------------------------------------------------------------
@@ -1788,6 +1855,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
         showPhase(PHASE_AFTERNOON);
         setStageLook(world, "afternoon");
         setObjective(activeShop.goals.afternoonFind);
+        if (isDay2) fireDay2Surprise(); // an unchosen twist to keep Day 2 fresh
       },
     });
   });
@@ -2120,6 +2188,19 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
         window.location.reload(); // a clean, full restart back to the title
       },
     });
+
+    // Day 2 toggle: switch difficulty and restart. The flag is read at startup.
+    doc.getElementById("day-toggle-label")?.setProperties({ text: isDay2 ? "Back to Day 1" : "Try Day 2 (Harder)" });
+    doc.getElementById("day-toggle-button")?.setProperties({
+      onClick: function () {
+        sfxClick();
+        try {
+          if (isDay2) localStorage.removeItem("bossForADay:day");
+          else localStorage.setItem("bossForADay:day", "2");
+        } catch { /* storage blocked */ }
+        window.location.reload();
+      },
+    });
   });
 
   // Decide the money personality from the final meters, fill the card, show it.
@@ -2187,6 +2268,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       app: "boss-for-a-day",
       schema: 1,
       timestamp: new Date().toISOString(),
+      day: dayNumber,
       shop: { id: activeShop.id, name: activeShop.shopName },
       player: name,
       personality: t.name,
@@ -2198,7 +2280,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     lastResultText = buildResultText(payload, best, worst);
 
     if (reportDoc) {
-      reportDoc.getElementById("report-eyebrow")?.setProperties({ text: activeShop.shopName.toUpperCase() });
+      reportDoc.getElementById("report-eyebrow")?.setProperties({ text: activeShop.shopName.toUpperCase() + (isDay2 ? " · DAY 2" : "") });
       reportDoc.getElementById("greeting")?.setProperties({ text: "Great work, " + name + "!" });
       reportDoc.getElementById("personality-name")?.setProperties({ text: t.name });
       reportDoc.getElementById("personality-blurb")?.setProperties({ text: blurb });

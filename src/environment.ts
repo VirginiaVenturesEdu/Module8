@@ -838,6 +838,42 @@ export function buildBeacon(world: any) {
   return e;
 }
 
+// A plain little shopper figure: legs, a colored shirt, and a head. Kept simple
+// (a few boxes) so a handful of them costs almost nothing to draw.
+function buildCustomerFigure(shirt: string): Group {
+  const g = new Group();
+  const legs = meshBox(0.34, 0.7, 0.24, "#3a3a44");
+  legs.position.set(0, 0.35, 0);
+  g.add(legs);
+  const torso = meshBox(0.4, 0.6, 0.26, shirt);
+  torso.position.set(0, 0.98, 0);
+  g.add(torso);
+  const head = meshSphere(0.16, "#e8c39a");
+  head.position.set(0, 1.42, 0);
+  g.add(head);
+  return g;
+}
+
+// Ambient life: a few customers that walk into the shop during the midday rush.
+// Built hidden at their start spots, facing where they will walk; index.ts shows
+// them and slides them to their milling spots while the phase is Midday. Returns
+// each figure with its start and target so the caller can drive the walk.
+export function buildCustomers(world: any) {
+  const specs = [
+    { shirt: "#c0655a", start: { x: 3.0, z: 5.2 }, target: { x: 1.7, z: 1.8 } },
+    { shirt: "#4f8a6d", start: { x: 1.2, z: 5.6 }, target: { x: 0.2, z: 2.4 } },
+    { shirt: "#5b6fa8", start: { x: 3.6, z: 4.8 }, target: { x: 2.4, z: 2.0 } },
+  ];
+  return specs.map(function (s) {
+    const fig = buildCustomerFigure(s.shirt);
+    const e = world.createTransformEntity(fig);
+    e.object3D!.position.set(s.start.x, 0, s.start.z);
+    e.object3D!.rotation.y = Math.atan2(s.target.x - s.start.x, s.target.z - s.start.z);
+    e.object3D!.visible = false;
+    return { entity: e, start: s.start, target: s.target };
+  });
+}
+
 // ============================================================================
 // SHOP FURNITURE  —  the two fixtures the panels anchor to. The sales counter
 // (with its little register) stands at the bank station, where the Morning and
