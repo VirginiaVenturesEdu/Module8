@@ -26,25 +26,25 @@ import {
 } from "@iwsdk/core";
 
 import { buildBaseWorld, buildShopProps, setStageLook, GUS_SPOT, STATIONS } from "./environment";
-import { setActiveShop, activeShop, SHOPS, ShopId, ShopPack } from "./shops";
-import { sfxStage, sfxClick, sfxCoin, sfxFanfare } from "./sfx";
+import { setActiveShop, activeShop, SHOPS, ShopId, ShopPack, ECONOMY } from "./shops";
+import { sfxStage, sfxClick, sfxCoin, sfxDown, sfxFanfare } from "./sfx";
 
 // ============================================================================
-// ECONOMIC CONSTANTS  (carried over; the stages read these in later prompts)
+// THE DAY'S LEDGER  (the real economy — money in vs. money out)
+// You open the register with ECONOMY.startingCash and run the shop. Every buy is
+// money out; every sale is money in. Net profit at close is simply in minus out.
+// These totals are tracked independently of the on-screen number (which floors
+// at $0), so the end-of-day report is always accurate. The morning pricing and
+// stocking picks are remembered here so the two sales ticks can size themselves.
 // ============================================================================
-const ECON = {
-  STARTING_MONEY: 20,            // birthday money in the piggy bank
-  ALLOWANCE_PER_WEEK: 10,        // money earned each week in Stage 1
-  SAVINGS_INTEREST_RATE: 0.1,    // savings grows this much each week
-  FRIEND_OFFER_PRICE: 15,        // the rare item the friend offers in Stage 1
-  PAYCHECK_STAGE2: 100,          // the Stage 2 part-time-job paycheck
-  INVEST_GOOD_MULTIPLIER: 1.4,   // an investment that does well
-  INVEST_BAD_MULTIPLIER: 0.7,    // an investment that struggles
-  INVEST_GOOD_PROBABILITY: 0.55, // chance an investment does well
-  BIG_DECISION_FUNDS: 200,       // the Stage 3 money to spread around
-  SURPRISE_EXPENSE: 30,          // the unexpected cost in Stage 3
-  DIVERSIFY_MIN_CHANNELS: 3,     // places you must use to count as spreading out
-};
+let dayStartCash = 0;   // the float you began the day with
+let dayMoneyIn = 0;     // running total of everything earned today
+let dayMoneyOut = 0;    // running total of everything spent today
+let dayStarted = false; // guard so the day is only set up once per playthrough
+let priceTier = "";     // "premium" | "fair" | "bargain" — set in the morning
+let stockTier = "";     // "fancy" | "mix" | "bulk" — set in the morning
+let flyerChosen = false; // true if the ad flyer growth move was bought
+let dealChosen = false;  // true if the bulk-supply deal growth move was bought
 
 // ============================================================================
 // HOUSE PALETTE  (the Market Harvest colonial parchment look)
@@ -68,13 +68,6 @@ const SCORE_MAX = 100;
 let scoreSatisfaction = 50;
 let scoreProfit = 50;
 let scoreInstinct = 50;
-
-// Which plan the player picked in each stage. The final money personality is
-// decided from THESE choices, not just the meter numbers, so the report can
-// never tell a spender they were a saver. Set when a plan card is clicked.
-let stage1Choice = "";
-let stage2Choice = "";
-let stage3Choice = "";
 
 function clampScore(value: number): number {
   return Math.max(SCORE_MIN, Math.min(SCORE_MAX, value));
@@ -513,7 +506,54 @@ function changeMoney(delta: number) {
   animateMoneyTo(target, delta > 0);
   console.log("[MONEY] change " + delta + " to " + target);
 }
-void changeMoney; // used by the stages in the next prompts
+
+// The two ways money actually moves during the day. spend() is cash leaving the
+// register (buying stock, a replacement, a promo); earn() is cash coming in (a
+// sale, a deposit). Both keep the day's ledger honest AND animate the readout,
+// so the number the student sees always matches money-in minus money-out.
+function spend(amount: number) {
+  if (amount <= 0) return;
+  dayMoneyOut += amount;
+  changeMoney(-amount);
+  sfxDown();
+}
+function earn(amount: number) {
+  if (amount <= 0) return;
+  dayMoneyIn += amount;
+  changeMoney(amount);
+  sfxCoin();
+}
+
+// A sales tick. Revenue grows with the morning's pricing and stocking picks, and
+// the ad flyer (if bought) pulls a bigger crowd on top. Rounded to a whole dollar.
+function computeRush(base: number): number {
+  const pf =
+    priceTier === "premium" ? ECONOMY.pricePremiumFactor
+    : priceTier === "bargain" ? ECONOMY.priceBargainFactor
+    : ECONOMY.priceFairFactor;
+  const sf =
+    stockTier === "fancy" ? ECONOMY.stockFancyFactor
+    : stockTier === "bulk" ? ECONOMY.stockBulkFactor
+    : ECONOMY.stockMixFactor;
+  let r = base * pf * sf;
+  if (flyerChosen) r += ECONOMY.flyerBonus;
+  return Math.round(r);
+}
+
+// Set up the day's money the first time the morning opens. Guarded so re-entering
+// the morning phase never wipes the ledger.
+function startDay() {
+  if (dayStarted) return;
+  dayStarted = true;
+  dayStartCash = ECONOMY.startingCash;
+  dayMoneyIn = 0;
+  dayMoneyOut = 0;
+  priceTier = "";
+  stockTier = "";
+  flyerChosen = false;
+  dealChosen = false;
+  setMoney(dayStartCash);
+}
 
 // The little counting animation behind changeMoney().
 function animateMoneyTo(target: number, isGain: boolean) {
@@ -562,11 +602,10 @@ const phasePanels: any = {};
 function showPhase(phase: string) {
   currentPhase = phase;
   setHudStage(phase);
-  if (phase === PHASE_SELECT) setMoney(ECON.STARTING_MONEY);
-  else if (phase === PHASE_MORNING) setMoney(ECON.STARTING_MONEY + ECON.ALLOWANCE_PER_WEEK);
-  else if (phase === PHASE_MIDDAY) setMoney(ECON.PAYCHECK_STAGE2);
-  else if (phase === PHASE_AFTERNOON) setMoney(ECON.BIG_DECISION_FUNDS);
-  else hideMoneyRow();
+  // The register opens once, when the morning begins, and the same cash carries
+  // through the whole day into the report. Before that (shop picker) it is hidden.
+  if (phase === PHASE_MORNING) startDay();
+  else if (phase === PHASE_SELECT) hideMoneyRow();
   for (const key in phasePanels) {
     const panel = phasePanels[key];
     if (panel && panel.object3D) panel.object3D.visible = false;
@@ -1173,51 +1212,102 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   let stage1ShowingOutcome = false; // true while the result is on screen
 
   whenPanelReady(stage1MoneyPanel, function (doc) {
+    const beatSupply = doc.getElementById("beat-supply");
     const beatPrice = doc.getElementById("beat-price");
     const beatStock = doc.getElementById("beat-stock");
     const beatReady = doc.getElementById("beat-ready");
     const readyText = doc.getElementById("ready-text");
+    const revenueLine = doc.getElementById("revenue-line");
+    const supplyAnswers = doc.getElementById("supply-answers");
+    const supplyNote = doc.getElementById("supply-note");
+    const supplyNext = doc.getElementById("supply-next");
 
-    beatPrice?.setProperties({ display: "flex" });
+    // The morning opens on the scarcity decision, then pricing, then stocking.
+    beatSupply?.setProperties({ display: "flex" });
+    beatPrice?.setProperties({ display: "none" });
     beatStock?.setProperties({ display: "none" });
     beatReady?.setProperties({ display: "none" });
+    supplyNote?.setProperties({ display: "none" });
+    supplyNext?.setProperties({ display: "none" });
+    revenueLine?.setProperties({ display: "none" });
 
+    let supplyPicked = false;
     let pricePicked = false;
     let stockPicked = false;
     const totals = { satisfaction: 0, profit: 0 };
 
-    function applyChoice(d: { profit: number; satisfaction: number }) {
+    function applyMeters(d: { profit: number; satisfaction: number }) {
       updateScore("profit", d.profit);
       updateScore("satisfaction", d.satisfaction);
       totals.profit += d.profit;
       totals.satisfaction += d.satisfaction;
-      sfxCoin();
     }
 
-    function pickPrice(d: { profit: number; satisfaction: number }) {
+    // SCARCITY / OPPORTUNITY COST — you can afford one growth move, not both.
+    // Both cost the same, so the whole lesson is "what did you give up?"
+    function pickSupply(kind: "deal" | "flyer") {
+      if (supplyPicked) return;
+      supplyPicked = true;
+      spend(ECONOMY.oppCost);
+      if (kind === "deal") {
+        dealChosen = true;
+        updateScore("profit", 6); // lower costs help the bottom line
+        totals.profit += 6;
+        supplyNote?.setProperties({ text: activeShop.economy.oppDealNote });
+      } else {
+        flyerChosen = true;
+        updateScore("satisfaction", 6); // a bigger crowd, more happy customers
+        totals.satisfaction += 6;
+        supplyNote?.setProperties({ text: activeShop.economy.oppFlyerNote });
+      }
+      supplyAnswers?.setProperties({ display: "none" });
+      supplyNote?.setProperties({ display: "flex" });
+      supplyNext?.setProperties({ display: "flex" });
+    }
+    doc.getElementById("supply-deal")?.setProperties({ onClick: function () { pickSupply("deal"); } });
+    doc.getElementById("supply-flyer")?.setProperties({ onClick: function () { pickSupply("flyer"); } });
+    supplyNext?.setProperties({
+      onClick: function () {
+        sfxClick();
+        beatSupply?.setProperties({ display: "none" });
+        beatPrice?.setProperties({ display: "flex" });
+      },
+    });
+
+    // PRICING sets the margin the two sales ticks earn; it costs nothing now.
+    function pickPrice(tier: string, d: { profit: number; satisfaction: number }) {
       if (pricePicked) return;
       pricePicked = true;
-      applyChoice(d);
+      priceTier = tier;
+      applyMeters(d);
+      sfxClick();
       beatPrice?.setProperties({ display: "none" });
       beatStock?.setProperties({ display: "flex" });
     }
-    doc.getElementById("price-premium")?.setProperties({ onClick: function () { pickPrice(MORNING.PRICE_PREMIUM); } });
-    doc.getElementById("price-fair")?.setProperties({ onClick: function () { pickPrice(MORNING.PRICE_FAIR); } });
-    doc.getElementById("price-bargain")?.setProperties({ onClick: function () { pickPrice(MORNING.PRICE_BARGAIN); } });
+    doc.getElementById("price-premium")?.setProperties({ onClick: function () { pickPrice("premium", MORNING.PRICE_PREMIUM); } });
+    doc.getElementById("price-fair")?.setProperties({ onClick: function () { pickPrice("fair", MORNING.PRICE_FAIR); } });
+    doc.getElementById("price-bargain")?.setProperties({ onClick: function () { pickPrice("bargain", MORNING.PRICE_BARGAIN); } });
 
-    function pickStock(d: { profit: number; satisfaction: number }) {
+    // STOCKING is real cash out (buying inventory), then the doors open and the
+    // lunch rush brings the first real revenue in — sized by these two picks.
+    function pickStock(tier: string, cost: number, d: { profit: number; satisfaction: number }) {
       if (stockPicked) return;
       stockPicked = true;
-      applyChoice(d);
+      stockTier = tier;
+      spend(cost);
+      applyMeters(d);
+      const lunch = computeRush(ECONOMY.lunchRushBase);
+      earn(lunch);
       readyText?.setProperties({ text: activeShop.morning.readyText });
+      revenueLine?.setProperties({ text: activeShop.economy.lunchRushLabel + " $" + lunch + "!", display: "flex" });
       showMeterChanges(doc, totals.satisfaction, totals.profit, 0);
       beatStock?.setProperties({ display: "none" });
       beatReady?.setProperties({ display: "flex" });
       stage1ShowingOutcome = true;
     }
-    doc.getElementById("stock-fancy")?.setProperties({ onClick: function () { pickStock(MORNING.STOCK_FANCY); } });
-    doc.getElementById("stock-mix")?.setProperties({ onClick: function () { pickStock(MORNING.STOCK_MIX); } });
-    doc.getElementById("stock-bulk")?.setProperties({ onClick: function () { pickStock(MORNING.STOCK_BULK); } });
+    doc.getElementById("stock-fancy")?.setProperties({ onClick: function () { pickStock("fancy", ECONOMY.stockFancyCost, MORNING.STOCK_FANCY); } });
+    doc.getElementById("stock-mix")?.setProperties({ onClick: function () { pickStock("mix", ECONOMY.stockMixCost, MORNING.STOCK_MIX); } });
+    doc.getElementById("stock-bulk")?.setProperties({ onClick: function () { pickStock("bulk", ECONOMY.stockBulkCost, MORNING.STOCK_BULK); } });
 
     doc.getElementById("continue-button")?.setProperties({
       onClick: function () {
@@ -1358,47 +1448,58 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     const beatComplaint = doc.getElementById("beat-complaint");
     const beatDone = doc.getElementById("beat-done");
     const doneText = doc.getElementById("done-text");
+    const revenueLine = doc.getElementById("revenue-line");
 
     beatRival?.setProperties({ display: "flex" });
     beatComplaint?.setProperties({ display: "none" });
     beatDone?.setProperties({ display: "none" });
+    revenueLine?.setProperties({ display: "none" });
 
     let rivalPicked = false;
     let complaintPicked = false;
     const totals = { satisfaction: 0, profit: 0, instinct: 0 };
 
-    function pickRival(d: { instinct: number; profit: number }) {
+    // Holding steady with a thank-you treat costs a little cash; matching or
+    // ignoring the rival costs nothing now (matching shows up in weaker sales).
+    function pickRival(cost: number, d: { instinct: number; profit: number }) {
       if (rivalPicked) return;
       rivalPicked = true;
       updateScore("instinct", d.instinct);
       updateScore("profit", d.profit);
       totals.instinct += d.instinct;
       totals.profit += d.profit;
-      sfxCoin();
+      if (cost > 0) spend(cost);
+      else sfxClick();
       beatRival?.setProperties({ display: "none" });
       beatComplaint?.setProperties({ display: "flex" });
     }
-    doc.getElementById("rival-hold")?.setProperties({ onClick: function () { pickRival(MIDDAY.RIVAL_HOLD); } });
-    doc.getElementById("rival-match")?.setProperties({ onClick: function () { pickRival(MIDDAY.RIVAL_MATCH); } });
-    doc.getElementById("rival-ignore")?.setProperties({ onClick: function () { pickRival(MIDDAY.RIVAL_IGNORE); } });
+    doc.getElementById("rival-hold")?.setProperties({ onClick: function () { pickRival(ECONOMY.rivalPromoCost, MIDDAY.RIVAL_HOLD); } });
+    doc.getElementById("rival-match")?.setProperties({ onClick: function () { pickRival(0, MIDDAY.RIVAL_MATCH); } });
+    doc.getElementById("rival-ignore")?.setProperties({ onClick: function () { pickRival(0, MIDDAY.RIVAL_IGNORE); } });
 
-    function pickComplaint(d: { satisfaction: number; profit: number }) {
+    // A no-charge replacement costs real cash now; the afternoon crowd then rolls
+    // in with the day's second sales tick, sized by the morning's price + stock.
+    function pickComplaint(cost: number, d: { satisfaction: number; profit: number }) {
       if (complaintPicked) return;
       complaintPicked = true;
       updateScore("satisfaction", d.satisfaction);
       updateScore("profit", d.profit);
       totals.satisfaction += d.satisfaction;
       totals.profit += d.profit;
-      sfxCoin();
+      if (cost > 0) spend(cost);
+      else sfxClick();
+      const afternoon = computeRush(ECONOMY.afternoonBase);
+      earn(afternoon);
       doneText?.setProperties({ text: activeShop.midday.doneText });
+      revenueLine?.setProperties({ text: activeShop.economy.afternoonRushLabel + " $" + afternoon + "!", display: "flex" });
       showMeterChanges(doc, totals.satisfaction, totals.profit, totals.instinct);
       beatComplaint?.setProperties({ display: "none" });
       beatDone?.setProperties({ display: "flex" });
       stage2ShowingOutcome = true;
     }
-    doc.getElementById("comp-free")?.setProperties({ onClick: function () { pickComplaint(MIDDAY.COMPLAINT_FREE); } });
-    doc.getElementById("comp-discount")?.setProperties({ onClick: function () { pickComplaint(MIDDAY.COMPLAINT_DISCOUNT); } });
-    doc.getElementById("comp-firm")?.setProperties({ onClick: function () { pickComplaint(MIDDAY.COMPLAINT_FIRM); } });
+    doc.getElementById("comp-free")?.setProperties({ onClick: function () { pickComplaint(ECONOMY.complaintFreeCost, MIDDAY.COMPLAINT_FREE); } });
+    doc.getElementById("comp-discount")?.setProperties({ onClick: function () { pickComplaint(0, MIDDAY.COMPLAINT_DISCOUNT); } });
+    doc.getElementById("comp-firm")?.setProperties({ onClick: function () { pickComplaint(0, MIDDAY.COMPLAINT_FIRM); } });
 
     doc.getElementById("continue-button")?.setProperties({
       onClick: function () {
@@ -1534,42 +1635,49 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     let orderPicked = false;
     const totals = { satisfaction: 0, profit: 0, instinct: 0 };
 
-    function pickStock(d: { satisfaction: number; profit: number }) {
+    // Leftovers: donating gives no cash (but happy customers), a markdown brings
+    // in a little cash, tossing gets nothing back.
+    function pickStock(gain: number, d: { satisfaction: number; profit: number }) {
       if (stockPicked) return;
       stockPicked = true;
       updateScore("satisfaction", d.satisfaction);
       updateScore("profit", d.profit);
       totals.satisfaction += d.satisfaction;
       totals.profit += d.profit;
-      sfxCoin();
+      if (gain > 0) earn(gain);
+      else sfxClick();
       stage3Engaged = true;
       beatStock?.setProperties({ display: "none" });
       beatOrder?.setProperties({ display: "flex" });
     }
-    doc.getElementById("close-donate")?.setProperties({ onClick: function () { pickStock(AFTERNOON.CLOSE_DONATE); } });
-    doc.getElementById("close-markdown")?.setProperties({ onClick: function () { pickStock(AFTERNOON.CLOSE_MARKDOWN); } });
-    doc.getElementById("close-toss")?.setProperties({ onClick: function () { pickStock(AFTERNOON.CLOSE_TOSS); } });
+    doc.getElementById("close-donate")?.setProperties({ onClick: function () { pickStock(0, AFTERNOON.CLOSE_DONATE); } });
+    doc.getElementById("close-markdown")?.setProperties({ onClick: function () { pickStock(ECONOMY.leftoverMarkdownGain, AFTERNOON.CLOSE_MARKDOWN); } });
+    doc.getElementById("close-toss")?.setProperties({ onClick: function () { pickStock(0, AFTERNOON.CLOSE_TOSS); } });
 
-    function pickOrder(d: { profit: number; satisfaction: number }) {
+    // The big future order books a deposit into the register now — bigger if you
+    // quoted premium, smaller if you quoted a friendly rate.
+    function pickOrder(deposit: number, d: { profit: number; satisfaction: number }) {
       if (orderPicked) return;
       orderPicked = true;
       updateScore("profit", d.profit);
       updateScore("satisfaction", d.satisfaction);
       totals.profit += d.profit;
       totals.satisfaction += d.satisfaction;
-      sfxCoin();
+      earn(deposit);
       doneText?.setProperties({ text: activeShop.afternoon.doneText });
       showMeterChanges(doc, totals.satisfaction, totals.profit, totals.instinct);
       beatOrder?.setProperties({ display: "none" });
       beatDone?.setProperties({ display: "flex" });
     }
-    doc.getElementById("order-premium")?.setProperties({ onClick: function () { pickOrder(AFTERNOON.ORDER_PREMIUM); } });
-    doc.getElementById("order-fair")?.setProperties({ onClick: function () { pickOrder(AFTERNOON.ORDER_FAIR); } });
-    doc.getElementById("order-friendly")?.setProperties({ onClick: function () { pickOrder(AFTERNOON.ORDER_FRIENDLY); } });
+    doc.getElementById("order-premium")?.setProperties({ onClick: function () { pickOrder(ECONOMY.orderDepositPremium, AFTERNOON.ORDER_PREMIUM); } });
+    doc.getElementById("order-fair")?.setProperties({ onClick: function () { pickOrder(ECONOMY.orderDepositFair, AFTERNOON.ORDER_FAIR); } });
+    doc.getElementById("order-friendly")?.setProperties({ onClick: function () { pickOrder(ECONOMY.orderDepositFriendly, AFTERNOON.ORDER_FRIENDLY); } });
 
     doc.getElementById("continue-button")?.setProperties({
       onClick: function () {
         sfxStage();
+        // If you took the morning bulk deal, its supply savings pay back now.
+        if (dealChosen) earn(ECONOMY.bulkDealRebate);
         stage3Done = true;
         stage3Engaged = false;
         stage3Panel.object3D!.visible = false;
@@ -1647,6 +1755,19 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
 
   // Decide the money personality from the final meters, fill the card, show it.
   function showReport() {
+    // Net profit for the day is simply money in minus money out. Tie the abstract
+    // Business Profit meter to the real dollars so the two never disagree: a truly
+    // profitable day lifts it, a thin day dents it. Do this BEFORE reading the
+    // meters below so the personality reflects the reconciled numbers.
+    const netProfit = dayMoneyIn - dayMoneyOut;
+    let profitNudge = 0;
+    if (netProfit >= 250) profitNudge = 10;
+    else if (netProfit >= 170) profitNudge = 5;
+    else if (netProfit >= 90) profitNudge = 0;
+    else if (netProfit >= 30) profitNudge = -5;
+    else profitNudge = -10;
+    if (profitNudge !== 0) updateScore("profit", profitNudge);
+
     const S = scoreSatisfaction;
     const P = scoreProfit;
     const I = scoreInstinct;
@@ -1683,6 +1804,12 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       reportDoc.getElementById("fill-growth")?.setProperties({ width: Math.round(S * 0.4) });
       reportDoc.getElementById("fill-security")?.setProperties({ width: Math.round(P * 0.4) });
       reportDoc.getElementById("fill-smarts")?.setProperties({ width: Math.round(I * 0.4) });
+
+      // The dollars: money in, money out, and the day's net profit.
+      reportDoc.getElementById("report-money-in")?.setProperties({ text: "$" + dayMoneyIn });
+      reportDoc.getElementById("report-money-out")?.setProperties({ text: "$" + dayMoneyOut });
+      const netText = (netProfit >= 0 ? "+$" : "-$") + Math.abs(netProfit);
+      reportDoc.getElementById("report-net")?.setProperties({ text: netText, color: netProfit >= 0 ? "#2e7d32" : "#b23a2e" });
     }
 
     sfxFanfare();
@@ -1824,6 +1951,9 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
 
     whenPanelReady(stage1MoneyPanel, function (doc) {
       const q = pack.morning;
+      doc.getElementById("supply-q")?.setProperties({ text: pack.economy.oppQ });
+      doc.getElementById("supply-deal-label")?.setProperties({ text: pack.economy.oppDealLabel });
+      doc.getElementById("supply-flyer-label")?.setProperties({ text: pack.economy.oppFlyerLabel });
       doc.getElementById("price-q")?.setProperties({ text: q.priceQ });
       doc.getElementById("price-premium-label")?.setProperties({ text: q.priceP });
       doc.getElementById("price-fair-label")?.setProperties({ text: q.priceF });
@@ -1911,13 +2041,13 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       });
     }
 
-    // Morning activity panel: pricing and stocking.
+    // Morning activity panel: the growth decision, pricing, and stocking.
     whenPanelReady(stage1MoneyPanel, function (doc) {
       doc.getElementById("game-panel")?.setProperties({ backgroundColor: t.panelBg, borderColor: t.panelBorder });
-      for (const aid of ["price-premium", "price-fair", "price-bargain", "stock-fancy", "stock-mix", "stock-bulk"]) {
+      for (const aid of ["supply-deal", "supply-flyer", "price-premium", "price-fair", "price-bargain", "stock-fancy", "stock-mix", "stock-bulk"]) {
         doc.getElementById(aid)?.setProperties({ backgroundColor: t.boxBg, borderColor: t.boxBorder });
       }
-      for (const tid of ["price-q", "stock-q", "price-premium-label", "price-fair-label", "price-bargain-label", "stock-fancy-label", "stock-mix-label", "stock-bulk-label", "ready-text"]) {
+      for (const tid of ["supply-q", "supply-deal-label", "supply-flyer-label", "price-q", "stock-q", "price-premium-label", "price-fair-label", "price-bargain-label", "stock-fancy-label", "stock-mix-label", "stock-bulk-label", "ready-text"]) {
         doc.getElementById(tid)?.setProperties({ color: t.ink });
       }
     });
@@ -1961,8 +2091,8 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     });
   }
 
-  // Log the economic constants once so we can confirm they loaded.
-  console.log("[Money Moves] economic constants loaded", ECON);
+  // Log the economy config once so we can confirm it loaded.
+  console.log("[Boss for a Day] economy loaded", ECONOMY);
 
   // consumePress: clear a stuck "Pressed" tag so 3D buttons stay reliable.
   // Used once the panels and 3D buttons arrive in later prompts.

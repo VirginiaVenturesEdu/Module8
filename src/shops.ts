@@ -59,7 +59,67 @@ export interface ShopPack {
     orderQ: string; orderP: string; orderF: string; orderFriendly: string;
     doneText: string;
   };
+
+  // The MONEY side of the day. The dollar amounts themselves are shared and live
+  // in ECONOMY (below), so the whole game balances from one place. What lives here
+  // per shop is only the WORDS around money: the morning "spend to grow" choice
+  // (a real scarcity / opportunity-cost decision — you can afford one, not both)
+  // and the flavor labels on the between-stage sales ticks.
+  economy: {
+    oppQ: string;          // the framing line for the morning growth decision
+    oppDealLabel: string;  // option A: the bulk-supply deal (saves money later)
+    oppFlyerLabel: string; // option B: the ad flyer (draws a bigger crowd)
+    oppDealNote: string;   // opportunity-cost callout shown after picking the deal
+    oppFlyerNote: string;  // opportunity-cost callout shown after picking the flyer
+    lunchRushLabel: string;     // e.g. "The lunch rush brought in"
+    afternoonRushLabel: string; // e.g. "The afternoon crowd brought in"
+  };
 }
+
+// ----------------------------------------------------------------------------
+// ECONOMY — the one place the whole day is balanced. Every dollar amount lives
+// here so a teacher (or a later phase) can retune the game without touching the
+// stage logic. All three shops share these numbers; only the wording differs.
+//
+// The day: you open the register with startingCash, spend to stock and run the
+// shop, and take in revenue on two "sales ticks" (lunch rush, afternoon crowd)
+// whose size grows with your pricing and stocking choices. Net profit at close
+// is simply money in minus money out.
+// ----------------------------------------------------------------------------
+export const ECONOMY = {
+  startingCash: 150, // the register float you start the day with
+
+  // MORNING opportunity-cost decision. Both growth moves cost the SAME, so the
+  // lesson is purely "what did you give up?" — not "which number is bigger."
+  oppCost: 60,        // price of the bulk deal OR the flyer (you can pick one)
+  flyerBonus: 40,     // the flyer adds this to EACH sales tick (two rushes)
+  bulkDealRebate: 70, // the deal pays back at close as lower supply costs
+
+  // MORNING stocking — buying inventory is real cash out of the register.
+  stockFancyCost: 55, // high-end stock costs the most up front
+  stockMixCost: 45,
+  stockBulkCost: 40,
+
+  // Sales ticks. revenue = base x priceFactor x stockFactor (+ flyer if bought).
+  lunchRushBase: 80,
+  afternoonBase: 85,
+  pricePremiumFactor: 1.2, // charge more, earn more per sale
+  priceFairFactor: 1.1,
+  priceBargainFactor: 1.0,
+  stockFancyFactor: 1.18, // pricier stock sells for more
+  stockMixFactor: 1.1,
+  stockBulkFactor: 1.04,
+
+  // MIDDAY cash events.
+  rivalPromoCost: 12,   // the thank-you treat when you hold steady on price
+  complaintFreeCost: 16, // the cost of a no-charge replacement
+
+  // AFTERNOON cash events.
+  leftoverMarkdownGain: 22, // marking down leftovers brings in a little cash
+  orderDepositPremium: 60,  // deposit booked now on the big future order
+  orderDepositFair: 45,
+  orderDepositFriendly: 32,
+};
 
 // ----------------------------------------------------------------------------
 // SHOP 1 — Sweet Capital Bakery (Cary Street, Richmond) — owner Ms. Delia
@@ -130,6 +190,15 @@ const BAKERY: ShopPack = {
     orderF: "A fair price for a big job.",
     orderFriendly: "A friendly rate to keep them coming back.",
     doneText: "That is a wrap. Time to see how your day at the shop went.",
+  },
+  economy: {
+    oppQ: "You have $150 to run the shop, and one big way to grow it. You can afford ONE of these today, not both.",
+    oppDealLabel: "Take the bulk flour deal: spend $60 now to lower your baking costs all day.",
+    oppFlyerLabel: "Buy an ad flyer: spend $60 to pull a bigger crowd to the bakery.",
+    oppDealNote: "Opportunity cost: taking the deal means no flyer today. You traded a bigger crowd for lower supply costs.",
+    oppFlyerNote: "Opportunity cost: the flyer means skipping the deal. You traded lower supply costs for a bigger crowd.",
+    lunchRushLabel: "The lunch rush brought in",
+    afternoonRushLabel: "The afternoon crowd brought in",
   },
 };
 
@@ -203,6 +272,15 @@ const SURF: ShopPack = {
     orderFriendly: "A friendly rate to keep them coming back.",
     doneText: "That is a wrap. Time to see how your day at the shop went.",
   },
+  economy: {
+    oppQ: "You have $150 to run the shop, and one big way to grow it. You can afford ONE of these today, not both.",
+    oppDealLabel: "Take the bulk wetsuit deal: spend $60 now to lower your gear costs all day.",
+    oppFlyerLabel: "Buy a boardwalk banner: spend $60 to pull a bigger crowd to the shop.",
+    oppDealNote: "Opportunity cost: taking the deal means no banner today. You traded a bigger crowd for lower gear costs.",
+    oppFlyerNote: "Opportunity cost: the banner means skipping the deal. You traded lower gear costs for a bigger crowd.",
+    lunchRushLabel: "The boardwalk rush brought in",
+    afternoonRushLabel: "The afternoon crowd brought in",
+  },
 };
 
 // ----------------------------------------------------------------------------
@@ -274,6 +352,15 @@ const REPAIR: ShopPack = {
     orderF: "A fair price for a big batch.",
     orderFriendly: "A friendly rate to keep them coming back.",
     doneText: "That is a wrap. Time to see how your day at the shop went.",
+  },
+  economy: {
+    oppQ: "You have $150 to run the shop, and one big way to grow it. You can afford ONE of these today, not both.",
+    oppDealLabel: "Take the bulk parts deal: spend $60 now to lower your repair costs all day.",
+    oppFlyerLabel: "Buy an ad flyer: spend $60 to pull more customers to the shop.",
+    oppDealNote: "Opportunity cost: taking the deal means no flyer today. You traded more customers for lower parts costs.",
+    oppFlyerNote: "Opportunity cost: the flyer means skipping the deal. You traded lower parts costs for more customers.",
+    lunchRushLabel: "The midday walk-ins brought in",
+    afternoonRushLabel: "The afternoon jobs brought in",
   },
 };
 

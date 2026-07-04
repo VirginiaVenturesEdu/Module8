@@ -8,12 +8,25 @@
   .answer { display: flex; align-items: center; width: 110; padding-top: 3; padding-bottom: 3; padding-left: 4; padding-right: 4; margin-top: 1.5; background-color: #fbf4e3; border-width: 1.2; border-color: #1F3A5F; border-radius: 3; cursor: pointer; }
   .answer-label { font-size: 3.4; color: #1F3A5F; }
   .ready-text { font-size: 4; color: #1F3A5F; text-align: center; margin-top: 2; }
+  .opp-note { display: none; font-size: 3.4; font-weight: bold; color: #a23a1c; text-align: center; margin-top: 2.5; }
+  .revenue-line { display: none; font-size: 4; font-weight: bold; color: #2e7d32; text-align: center; margin-top: 2; }
   .meter-change { display: none; font-size: 3.2; font-weight: bold; text-align: center; margin-top: 1; }
   .continue-button { display: flex; align-items: center; justify-content: center; margin-top: 4; padding-top: 3; padding-bottom: 3; padding-left: 9; padding-right: 9; background-color: #c8962a; border-radius: 4; cursor: pointer; }
   .continue-label { font-size: 4.4; font-weight: bold; color: #1F3A5F; word-break: keep-all; }
 </style>
 
 <div id="game-panel" class="panel">
+  <div id="beat-supply" class="beat">
+    <span class="eyebrow">SPEND TO GROW</span>
+    <span id="supply-q" class="q-text">You have $150 to run the shop. You can afford ONE growth move today, not both.</span>
+    <div id="supply-answers" class="answers">
+      <div id="supply-deal" class="answer"><span id="supply-deal-label" class="answer-label">Take the bulk deal.</span></div>
+      <div id="supply-flyer" class="answer"><span id="supply-flyer-label" class="answer-label">Buy an ad flyer.</span></div>
+    </div>
+    <span id="supply-note" class="opp-note"></span>
+    <div id="supply-next" class="continue-button"><span class="continue-label">Next</span></div>
+  </div>
+
   <div id="beat-price" class="beat">
     <span class="eyebrow">SET YOUR PRICES</span>
     <span id="price-q" class="q-text">How do you price the bakery's treats this morning?</span>
@@ -37,6 +50,7 @@
   <div id="beat-ready" class="beat">
     <span class="eyebrow">OPEN FOR BUSINESS</span>
     <span id="ready-text" class="ready-text">...</span>
+    <span id="revenue-line" class="revenue-line"></span>
     <span id="change-sat" class="meter-change"></span>
     <span id="change-profit" class="meter-change"></span>
     <span id="change-instinct" class="meter-change"></span>
